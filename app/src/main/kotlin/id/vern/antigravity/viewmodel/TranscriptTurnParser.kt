@@ -120,6 +120,21 @@ object TranscriptTurnParser {
         }
     }
 
+    private fun computeNextStepDurationSec(lines: List<String>, currentIndex: Int, currTimestampMs: Long): Int? {
+        if (currTimestampMs <= 0L) return null
+        for (j in (currentIndex + 1) until lines.size) {
+            val nextLine = lines[j]
+            if (nextLine.isBlank()) continue
+            val nextObj = try { JSONObject(nextLine) } catch (_: Throwable) { continue }
+            val nextMs = parseIsoTimestamp(nextObj.optString("created_at"))
+            if (nextMs > currTimestampMs) {
+                val diffSec = ((nextMs - currTimestampMs) / 1000L).toInt()
+                return if (diffSec in 1..600) diffSec else null
+            }
+        }
+        return null
+    }
+
     fun readTranscriptTurnLines(file: File, maxTailBytes: Long = 512 * 1024L): List<String> {
         return try {
             val length = file.length()
@@ -190,9 +205,10 @@ object TranscriptTurnParser {
                         if (!thoughts.contains(thinking)) {
                             thoughts.add(thinking)
                         }
-                        val durationSec = if (prevTimestampMs > 0L && currTimestampMs > prevTimestampMs) {
-                            ((currTimestampMs - prevTimestampMs) / 1000).toInt().coerceIn(1, 300)
-                        } else 6
+                        val durationSec = computeNextStepDurationSec(turnLines, i, currTimestampMs)
+                            ?: if (prevTimestampMs > 0L && currTimestampMs > prevTimestampMs) {
+                                ((currTimestampMs - prevTimestampMs) / 1000).toInt().coerceIn(1, 600)
+                            } else null
 
                         val safeThinking = thinking
                         steps.add(
@@ -417,13 +433,14 @@ object TranscriptTurnParser {
                     if (thinking.isNotEmpty()) {
                         if (currentThinking.isNotEmpty()) currentThinking.append("\n\n")
                         currentThinking.append(thinking)
+                        val durationSec = computeNextStepDurationSec(lines, i, timestamp)
                         currentAssistantSteps.add(
                             AgentExecutionStep(
                                 id = "step_${i}_thought",
                                 kind = AgentStepKind.THOUGHT,
                                 title = context.getString(R.string.chat_thought_process),
                                 detail = thinking,
-                                durationSeconds = 6,
+                                durationSeconds = durationSec,
                                 isCompleted = true
                             )
                         )

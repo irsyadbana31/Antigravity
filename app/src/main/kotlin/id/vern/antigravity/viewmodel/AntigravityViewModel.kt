@@ -1787,6 +1787,11 @@ class AntigravityViewModel : ViewModel() {
                     var lastStreamUpdateMs = 0L
                     var lastStepUpdateMs = 0L
                     var lastTranscriptPollMs = 0L
+                    var activeThoughtStartMs = 0L
+                    val activeThoughtSb = StringBuilder()
+                    val liveThoughtDurations = mutableListOf<Int>()
+                    var lastAgentResponseDurationSec = 0
+                    var thoughtSeq = 0
                     val authUrlRegex = "(https://accounts\\.google\\.com/o/oauth2/auth\\S+)".toRegex()
 
                     var currentTurn = 0
@@ -1851,7 +1856,7 @@ class AntigravityViewModel : ViewModel() {
                             addLog("Agent", "Autonomous turn $currentTurn started...")
                         }
 
-                        exitCode = EngineExecutor.executeAgy(context, args, workingDir = validWsDir) { line, exitCode ->
+                        val onAgyLine: (String, Boolean) -> Unit = { line, _ ->
                         val trimmed = line.trim()
                         val match = authUrlRegex.find(trimmed)
                         if (match != null) {
@@ -2126,21 +2131,38 @@ class AntigravityViewModel : ViewModel() {
                                                     }
                                                 }
                                             } else if (stepType == "thought" || stepType == "reasoning") {
-                                                val thoughtText = stepUpdate.optString("text", "")
-                                                val duration = stepUpdate.optInt("duration_seconds", 6).coerceAtLeast(1)
+                                                val rawText = stepUpdate.optString("text", "")
+                                                val textDelta = stepUpdate.optString("text_delta", "")
+                                                if (rawText.isNotEmpty()) {
+                                                    activeThoughtSb.clear()
+                                                    activeThoughtSb.append(rawText)
+                                                } else if (textDelta.isNotEmpty()) {
+                                                    activeThoughtSb.append(textDelta)
+                                                }
+                                                val thoughtText = activeThoughtSb.toString()
+                                                val now = System.currentTimeMillis()
+                                                if (activeThoughtStartMs == 0L) {
+                                                    activeThoughtStartMs = now
+                                                }
+                                                val rawDur = stepUpdate.optDouble("duration_seconds", 0.0).toInt()
+                                                val duration = if (rawDur > 0) {
+                                                    rawDur
+                                                } else {
+                                                    ((now - activeThoughtStartMs) / 1000L).toInt().coerceAtLeast(1)
+                                                }
+                                                val isDone = state == "DONE"
                                                 val thoughtStep = AgentExecutionStep(
-                                                    id = "step_live_thought_${assistantMsgId}",
+                                                    id = "step_live_thought_${assistantMsgId}_${thoughtSeq}",
                                                     kind = AgentStepKind.THOUGHT,
                                                     title = "Thought",
                                                     detail = thoughtText,
                                                     durationSeconds = duration,
-                                                    isCompleted = false
+                                                    isCompleted = isDone
                                                 )
-                                                val now = System.currentTimeMillis()
-                                                if (now - lastStepUpdateMs > 300L) {
+                                                if (isDone || now - lastStepUpdateMs > 150L) {
                                                     lastStepUpdateMs = now
-                                                    if (thoughtText.isNotBlank()) {
-                                                        TerminalSessionManager.appendAgyLine("* Thinking: ${thoughtText.replace('\n', ' ')}")
+                                                    if (thoughtText.isNotBlank() && isDone) {
+                                                        TerminalSessionManager.appendAgyLine("* Thinking (${duration}s): ${thoughtText.replace('\n', ' ').take(200)}")
                                                     }
                                                     mutableChatMessages.update { list ->
                                                         list.map { msg ->
@@ -2149,7 +2171,8 @@ class AntigravityViewModel : ViewModel() {
                                                                 val updated = if (curSteps.isNotEmpty() && curSteps.last().kind == AgentStepKind.THOUGHT && !curSteps.last().isCompleted) {
                                                                     curSteps.dropLast(1) + curSteps.last().copy(
                                                                         detail = thoughtText,
-                                                                        durationSeconds = duration
+                                                                        durationSeconds = duration,
+                                                                        isCompleted = isDone
                                                                     )
                                                                 } else {
                                                                     curSteps.map { it.copy(isCompleted = true) } + thoughtStep
@@ -2159,18 +2182,33 @@ class AntigravityViewModel : ViewModel() {
                                                         }
                                                     }
                                                 }
+                                                if (isDone) {
+                                                    liveThoughtDurations.add(duration)
+                                                    thoughtSeq++
+                                                    activeThoughtStartMs = 0L
+                                                    activeThoughtSb.clear()
+                                                }
                                             } else if (stepType == "agent_response") {
+                                                val respDur = stepUpdate.optDouble("duration_seconds", 0.0).toInt()
+                                                if (respDur > 0) {
+                                                    lastAgentResponseDurationSec = respDur
+                                                }
                                                 val textDelta = stepUpdate.optString("text_delta", "")
                                                 if (textDelta.isNotEmpty()) {
                                                     outputSb.append(textDelta)
                                                     val now = System.currentTimeMillis()
-                                                    if (now - lastStreamUpdateMs > 250L) {
+                                                    if (now - lastStreamUpdateMs > 200L) {
                                                         lastStreamUpdateMs = now
                                                         val currentOutput = outputSb.toString()
                                                         mutableChatMessages.update { list ->
                                                             list.map { msg ->
                                                                 if (msg.id == assistantMsgId) {
-                                                                    msg.copy(content = currentOutput)
+                                                                    val finalizedSteps = msg.steps.map { step ->
+                                                                        if (step.kind == AgentStepKind.THOUGHT && !step.isCompleted) {
+                                                                            step.copy(isCompleted = true)
+                                                                        } else step
+                                                                    }
+                                                                    msg.copy(content = currentOutput, steps = finalizedSteps)
                                                                 } else msg
                                                             }
                                                         }
@@ -2240,6 +2278,24 @@ class AntigravityViewModel : ViewModel() {
                         }
                     }
 
+                        val useAcp = currentSec != "request review" && currentSec != "request_review"
+                        exitCode = if (useAcp) {
+                            EngineExecutor.executeAgyAcpTurn(
+                                context = context,
+                                prompt = currentPrompt,
+                                cliModelId = cliId.ifBlank { null },
+                                sessionToResume = sessionToResume,
+                                workingDir = validWsDir,
+                                onOutputLine = onAgyLine
+                            ).let { acpCode ->
+                                if (acpCode == EngineExecutor.ACP_UNAVAILABLE) {
+                                    EngineExecutor.executeAgy(context, args, workingDir = validWsDir, onOutputLine = onAgyLine)
+                                } else acpCode
+                            }
+                        } else {
+                            EngineExecutor.executeAgy(context, args, workingDir = validWsDir, onOutputLine = onAgyLine)
+                        }
+
                         if (outputSb.isNotEmpty()) {
                             val finalCurrentOutput = outputSb.toString()
                             mutableChatMessages.update { list ->
@@ -2290,7 +2346,20 @@ class AntigravityViewModel : ViewModel() {
 
                     val transcriptSteps = finalParsed.steps
                     val finalSteps = if (!transcriptSteps.isNullOrEmpty()) {
-                        transcriptSteps
+                        val liveThoughtSteps = currentSteps.filter { it.kind == AgentStepKind.THOUGHT }
+                        var thoughtIdx = 0
+                        transcriptSteps.map { step ->
+                            if (step.kind == AgentStepKind.THOUGHT) {
+                                val resolvedDur = step.durationSeconds
+                                    ?: liveThoughtDurations.getOrNull(thoughtIdx)
+                                    ?: liveThoughtSteps.getOrNull(thoughtIdx)?.durationSeconds
+                                    ?: if (thoughtIdx == 0 && lastAgentResponseDurationSec > 0) lastAgentResponseDurationSec else null
+                                thoughtIdx++
+                                step.copy(durationSeconds = resolvedDur, isCompleted = true)
+                            } else {
+                                step
+                            }
+                        }
                     } else if (currentSteps.isNotEmpty()) {
                         val hasThought = currentSteps.any { it.kind == AgentStepKind.THOUGHT }
                         if (!hasThought && finalThinking != null) {

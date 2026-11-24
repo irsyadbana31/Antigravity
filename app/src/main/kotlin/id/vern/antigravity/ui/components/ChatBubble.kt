@@ -67,7 +67,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -397,8 +399,22 @@ fun ChatBubble(
                             val thoughtDetail = message.thinking
 
                             if (!hasThoughtInSteps && (isSending || !thoughtDetail.isNullOrBlank())) {
-                                val elapsedSeconds = ((System.currentTimeMillis() - message.timestamp) / 1000).coerceAtLeast(1).toInt()
-                                val thoughtDuration = if (isSending) elapsedSeconds else 9
+                                var liveElapsedSeconds by remember(message.id) {
+                                    mutableIntStateOf(((System.currentTimeMillis() - message.timestamp) / 1000L).coerceAtLeast(1L).toInt())
+                                }
+                                LaunchedEffect(message.id, isSending) {
+                                    if (isSending) {
+                                        while (true) {
+                                            liveElapsedSeconds = ((System.currentTimeMillis() - message.timestamp) / 1000L).coerceAtLeast(1L).toInt()
+                                            delay(1000L)
+                                        }
+                                    }
+                                }
+                                val thoughtTitleText = if (isSending) {
+                                    stringResource(R.string.chat_thought_title, liveElapsedSeconds)
+                                } else {
+                                    stringResource(R.string.chat_thought_process)
+                                }
                                 val rot by animateFloatAsState(
                                     targetValue = if (thoughtExpanded) 180f else 0f,
                                     animationSpec = tween(durationMillis = 200),
@@ -420,7 +436,7 @@ fun ChatBubble(
                                         Spacer(modifier = Modifier.width(6.dp))
                                     }
                                     Text(
-                                        text = stringResource(R.string.chat_thought_title, thoughtDuration),
+                                        text = thoughtTitleText,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontSize = 11.5.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
@@ -1076,7 +1092,25 @@ fun AgentExecutionStepsView(
                         animationSpec = tween(durationMillis = 200),
                         label = "thoughtRot"
                     )
-                    val thoughtDuration = step.durationSeconds ?: 6
+                    var liveStepSeconds by remember(step.id) {
+                        mutableIntStateOf((step.durationSeconds ?: 1).coerceAtLeast(1))
+                    }
+                    LaunchedEffect(step.id, step.isCompleted) {
+                        if (!step.isCompleted) {
+                            val startMs = System.currentTimeMillis() - (liveStepSeconds * 1000L)
+                            while (true) {
+                                liveStepSeconds = ((System.currentTimeMillis() - startMs) / 1000L).coerceAtLeast(1L).toInt()
+                                delay(1000L)
+                            }
+                        } else if (step.durationSeconds != null) {
+                            liveStepSeconds = step.durationSeconds
+                        }
+                    }
+                    val stepThoughtTitle = when {
+                        !step.isCompleted -> stringResource(R.string.chat_thought_title, liveStepSeconds)
+                        step.durationSeconds != null -> stringResource(R.string.chat_thought_title, step.durationSeconds)
+                        else -> stringResource(R.string.chat_thought_process)
+                    }
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1085,8 +1119,16 @@ fun AgentExecutionStepsView(
                                 .clickable { isThoughtOpen = !isThoughtOpen }
                                 .padding(vertical = 2.dp)
                         ) {
+                            if (!step.isCompleted) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(10.dp),
+                                    strokeWidth = 1.5.dp,
+                                    color = AntigravityBlue
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
                             Text(
-                                text = stringResource(R.string.chat_thought_title, thoughtDuration),
+                                text = stepThoughtTitle,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
