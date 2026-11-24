@@ -5,14 +5,17 @@ import id.vern.antigravity.AntigravityApp
 import id.vern.antigravity.data.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class ConversationManagerDelegate {
+    private var loadMessagesJob: Job? = null
     private val mutableConversationHistory = MutableStateFlow<List<ConversationSummary>>(emptyList())
     val conversationHistory: StateFlow<List<ConversationSummary>> = mutableConversationHistory.asStateFlow()
 
@@ -50,6 +53,7 @@ class ConversationManagerDelegate {
 
     fun loadConversationHistory(
         context: Context,
+        scope: CoroutineScope? = null,
         onWorkspaceChange: (String) -> Unit,
         onMessagesLoaded: (List<ChatMessage>) -> Unit
     ) {
@@ -65,8 +69,21 @@ class ConversationManagerDelegate {
             if (!activeSummary.projectPath.isNullOrBlank()) {
                 onWorkspaceChange(activeSummary.projectPath)
             }
-            onMessagesLoaded(loadMessagesForConversation(context, activeSummary.id))
             saveLastActiveConversationId(context, activeSummary.id)
+            if (scope != null) {
+                loadMessagesJob?.cancel()
+                val targetId = activeSummary.id
+                loadMessagesJob = scope.launch(Dispatchers.IO) {
+                    val loaded = loadMessagesForConversation(context, targetId)
+                    withContext(Dispatchers.Main) {
+                        if (mutableActiveConversationId.value == targetId) {
+                            onMessagesLoaded(loaded)
+                        }
+                    }
+                }
+            } else {
+                onMessagesLoaded(loadMessagesForConversation(context, activeSummary.id))
+            }
         } else {
             mutableActiveConversationId.value = null
             mutableConversationTitle.value = "New Conversation"
@@ -118,8 +135,17 @@ class ConversationManagerDelegate {
         if (!summary.projectPath.isNullOrBlank()) {
             onWorkspaceChange(summary.projectPath)
         }
-        onMessagesLoaded(loadMessagesForConversation(context, summary.id))
         saveLastActiveConversationId(context, summary.id)
+        loadMessagesJob?.cancel()
+        val targetId = summary.id
+        loadMessagesJob = scope.launch(Dispatchers.IO) {
+            val loaded = loadMessagesForConversation(context, targetId)
+            withContext(Dispatchers.Main) {
+                if (mutableActiveConversationId.value == targetId) {
+                    onMessagesLoaded(loaded)
+                }
+            }
+        }
         onLog("Conversation", "Switched to conversation: ${summary.title}")
     }
 

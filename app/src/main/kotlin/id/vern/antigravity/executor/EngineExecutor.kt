@@ -19,9 +19,13 @@ object EngineExecutor {
     @Volatile
     private var isGitPermissionsSet = false
 
+    @Volatile
+    private var isAgyConfigSynced = false
+
     fun invalidateEnvironment() {
         isEnvironmentHealed = false
         isGitPermissionsSet = false
+        isAgyConfigSynced = false
     }
 
     suspend fun executeCommand(
@@ -167,7 +171,7 @@ object EngineExecutor {
         onOutput: (String, Boolean, Boolean) -> Unit
     ) {
         try {
-            val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8), 8192)
+            val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8), 32_768)
             val buffer = StringBuilder()
             var ch: Int
             while (reader.read().also { ch = it } != -1) {
@@ -235,48 +239,51 @@ object EngineExecutor {
         val targetCwd = if (workingDir != null && workingDir.exists() && workingDir.isDirectory) workingDir else homeDir
 
         try {
-            BootstrapInstaller.ensurePermissions(context)
-            OAuthManager.checkAndImportExistingToken(context)
-            OAuthManager.syncCompanionStateFiles(context)
+            if (!isAgyConfigSynced) {
+                BootstrapInstaller.ensurePermissions(context)
+                OAuthManager.checkAndImportExistingToken(context)
+                OAuthManager.syncCompanionStateFiles(context)
 
-            val gitConfig = File(homeDir, ".gitconfig")
-            val safeLine = "[safe]\n\tdirectory = *\n"
-            if (!gitConfig.exists()) {
-                gitConfig.writeText(safeLine)
-            } else if (!gitConfig.readText().contains("directory = *")) {
-                gitConfig.appendText("\n$safeLine")
-            }
+                val gitConfig = File(homeDir, ".gitconfig")
+                val safeLine = "[safe]\n\tdirectory = *\n"
+                if (!gitConfig.exists()) {
+                    gitConfig.writeText(safeLine)
+                } else if (!gitConfig.readText().contains("directory = *")) {
+                    gitConfig.appendText("\n$safeLine")
+                }
 
-            val rootConfig = File(filesDir, ".gemini/config")
-            val homeConfig = File(homeDir, ".gemini/config")
-            if (rootConfig.exists() && (!homeConfig.exists() || homeConfig.list().isNullOrEmpty())) {
-                homeConfig.mkdirs()
-                rootConfig.copyRecursively(homeConfig, overwrite = false)
-            } else if (homeConfig.exists() && (!rootConfig.exists() || rootConfig.list().isNullOrEmpty())) {
-                rootConfig.mkdirs()
-                homeConfig.copyRecursively(rootConfig, overwrite = false)
-            }
+                val rootConfig = File(filesDir, ".gemini/config")
+                val homeConfig = File(homeDir, ".gemini/config")
+                if (rootConfig.exists() && (!homeConfig.exists() || homeConfig.list().isNullOrEmpty())) {
+                    homeConfig.mkdirs()
+                    rootConfig.copyRecursively(homeConfig, overwrite = false)
+                } else if (homeConfig.exists() && (!rootConfig.exists() || rootConfig.list().isNullOrEmpty())) {
+                    rootConfig.mkdirs()
+                    homeConfig.copyRecursively(rootConfig, overwrite = false)
+                }
 
-            val candidateConfigs = listOf(
-                File(rootConfig, "config.json"),
-                File(homeConfig, "config.json"),
-                File(homeDir, ".gemini/antigravity-cli/settings.json")
-            )
-            for (cf in candidateConfigs) {
-                try {
-                    if (!cf.exists() || cf.length() == 0L) {
-                        cf.parentFile?.mkdirs()
-                        val obj = org.json.JSONObject()
-                        val userSettings = org.json.JSONObject().apply {
-                            put("planReviewPolicy", "Always Proceed")
-                            put("autoExecutionPolicy", "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER")
+                val candidateConfigs = listOf(
+                    File(rootConfig, "config.json"),
+                    File(homeConfig, "config.json"),
+                    File(homeDir, ".gemini/antigravity-cli/settings.json")
+                )
+                for (cf in candidateConfigs) {
+                    try {
+                        if (!cf.exists() || cf.length() == 0L) {
+                            cf.parentFile?.mkdirs()
+                            val obj = org.json.JSONObject()
+                            val userSettings = org.json.JSONObject().apply {
+                                put("planReviewPolicy", "Always Proceed")
+                                put("autoExecutionPolicy", "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER")
+                            }
+                            obj.put("userSettings", userSettings)
+                            cf.writeText(obj.toString(2), Charsets.UTF_8)
                         }
-                        obj.put("userSettings", userSettings)
-                        cf.writeText(obj.toString(2), Charsets.UTF_8)
-                    }
-                } catch (e: Throwable) {}
+                    } catch (e: Throwable) {}
+                }
+                id.vern.antigravity.service.PermissionConfigService.syncSettingsJsonFiles(context)
+                isAgyConfigSynced = true
             }
-            id.vern.antigravity.service.PermissionConfigService.syncSettingsJsonFiles(context)
         } catch (e: Exception) {}
 
         if (ldBin.exists() && agyBin.exists()) {
@@ -435,7 +442,7 @@ object EngineExecutor {
         try {
             val stdoutThread = Thread {
                 try {
-                    BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8)).use { reader ->
+                    BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8), 32_768).use { reader ->
                         var line: String?
                         while (reader.readLine().also { line = it } != null) {
                             line?.let { onOutputLine(it, false) }
@@ -446,7 +453,7 @@ object EngineExecutor {
 
             val stderrThread = Thread {
                 try {
-                    BufferedReader(InputStreamReader(process.errorStream, Charsets.UTF_8)).use { reader ->
+                    BufferedReader(InputStreamReader(process.errorStream, Charsets.UTF_8), 32_768).use { reader ->
                         var line: String?
                         while (reader.readLine().also { line = it } != null) {
                             line?.let { onOutputLine(it, true) }

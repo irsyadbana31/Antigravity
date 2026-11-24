@@ -16,8 +16,10 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class SystemGatewayServer(
@@ -27,9 +29,11 @@ class SystemGatewayServer(
 ) {
     companion object {
         private const val TAG = "SystemGateway"
+        private const val SOCKET_TIMEOUT_MS = 10_000
     }
 
-    private val executor = Executors.newFixedThreadPool(3)
+    private var acceptorExecutor: ExecutorService? = null
+    private var workerExecutor: ExecutorService? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var serverSocket: ServerSocket? = null
     @Volatile
@@ -39,17 +43,38 @@ class SystemGatewayServer(
     fun start() {
         if (running) return
         running = true
+        val acceptor = Executors.newSingleThreadExecutor()
+        val workers = Executors.newFixedThreadPool(6)
+        acceptorExecutor = acceptor
+        workerExecutor = workers
 
-        executor.execute {
+        acceptor.execute {
             try {
-                val socket = ServerSocket(port, 10, InetAddress.getByName("127.0.0.1"))
+                var boundSocket: ServerSocket? = null
+                var boundPort = port
+                for (candidate in port..(port + 10)) {
+                    try {
+                        val s = ServerSocket()
+                        s.reuseAddress = true
+                        s.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), candidate), 16)
+                        boundSocket = s
+                        boundPort = candidate
+                        break
+                    } catch (_: Exception) {
+                        // Try next port if already bound (e.g. side-by-side install)
+                    }
+                }
+                val socket = boundSocket ?: run {
+                    Log.w(TAG, "Could not bind gateway on ports $port..${port + 10}")
+                    return@execute
+                }
                 serverSocket = socket
-                Log.i(TAG, "Gateway server listening on 127.0.0.1:$port")
+                Log.i(TAG, "Gateway server listening on 127.0.0.1:$boundPort")
 
                 while (running && !socket.isClosed) {
                     try {
                         val client = socket.accept()
-                        executor.execute { handleClient(client) }
+                        workers.execute { handleClient(client) }
                     } catch (e: Exception) {
                         if (!running) break
                     }
@@ -67,11 +92,16 @@ class SystemGatewayServer(
             serverSocket?.close()
         } catch (e: Exception) {}
         serverSocket = null
+        acceptorExecutor?.shutdownNow()
+        workerExecutor?.shutdownNow()
+        acceptorExecutor = null
+        workerExecutor = null
     }
 
     private fun handleClient(socket: Socket) {
         socket.use { client ->
             try {
+                client.soTimeout = SOCKET_TIMEOUT_MS
                 val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
                 val firstLine = reader.readLine() ?: return
                 val parts = firstLine.split(" ")

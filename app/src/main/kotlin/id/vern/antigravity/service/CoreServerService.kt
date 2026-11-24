@@ -121,7 +121,7 @@ class CoreServerService : Service() {
     private fun startBackgroundDaemon() {
         serviceScope.launch {
             try {
-                delay(1500)
+                delay(400)
                 val daemonBin = File(filesDir, "usr/bin/agy-daemon")
                 if (daemonBin.canExecute()) {
                     Log.i(TAG, "Starting autonomous background daemon...")

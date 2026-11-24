@@ -781,6 +781,7 @@ class AntigravityViewModel : ViewModel() {
     fun loadConversationHistory(context: Context) =
         conversationManagerDelegate.loadConversationHistory(
             context = context,
+            scope = viewModelScope,
             onWorkspaceChange = { setWorkspacePath(context, it) },
             onMessagesLoaded = { mutableChatMessages.value = it }
         )
@@ -2095,7 +2096,7 @@ class AntigravityViewModel : ViewModel() {
                                                 }
 
                                                 val now = System.currentTimeMillis()
-                                                if (state != "ACTIVE" || now - lastStepUpdateMs > 300L) {
+                                                if (state != "ACTIVE" || now - lastStepUpdateMs > 120L) {
                                                     lastStepUpdateMs = now
                                                     val liveParsed = if (now - lastTranscriptPollMs > 3000L || state != "ACTIVE") {
                                                         lastTranscriptPollMs = now
@@ -2137,7 +2138,7 @@ class AntigravityViewModel : ViewModel() {
                                                     isCompleted = false
                                                 )
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastStepUpdateMs > 300L) {
+                                                if (now - lastStepUpdateMs > 120L) {
                                                     lastStepUpdateMs = now
                                                     if (thoughtText.isNotBlank()) {
                                                         TerminalSessionManager.appendAgyLine("* Thinking: ${thoughtText.replace('\n', ' ')}")
@@ -2164,7 +2165,7 @@ class AntigravityViewModel : ViewModel() {
                                                 if (textDelta.isNotEmpty()) {
                                                     outputSb.append(textDelta)
                                                     val now = System.currentTimeMillis()
-                                                    if (now - lastStreamUpdateMs > 250L) {
+                                                    if (now - lastStreamUpdateMs > 48L) {
                                                         lastStreamUpdateMs = now
                                                         val currentOutput = outputSb.toString()
                                                         mutableChatMessages.update { list ->
@@ -2208,7 +2209,7 @@ class AntigravityViewModel : ViewModel() {
                                 TerminalSessionManager.appendAgyLine(line)
                                 outputSb.append(line).append("\n")
                                 val now = System.currentTimeMillis()
-                                if (now - lastStreamUpdateMs > 250L) {
+                                if (now - lastStreamUpdateMs > 48L) {
                                     lastStreamUpdateMs = now
                                     val currentOutput = outputSb.toString()
                                     mutableChatMessages.update { list ->
@@ -2225,7 +2226,7 @@ class AntigravityViewModel : ViewModel() {
                                 TerminalSessionManager.appendAgyLine(line)
                                 outputSb.append(line).append("\n")
                                 val now = System.currentTimeMillis()
-                                if (now - lastStreamUpdateMs > 250L) {
+                                if (now - lastStreamUpdateMs > 48L) {
                                     lastStreamUpdateMs = now
                                     val currentOutput = outputSb.toString()
                                     mutableChatMessages.update { list ->

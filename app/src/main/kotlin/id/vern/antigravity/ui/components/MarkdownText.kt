@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.LruCache
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -69,7 +70,64 @@ private val BULLET_PREFIX_REGEX = Regex("""^[-*+]\s+""")
 private val NUM_PREFIX_REGEX = Regex("""^\d+\.\s+""")
 private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))""")
 
+private val markdownBlockCache = LruCache<String, List<MarkdownElement>>(64)
+private val inlineMarkdownCache = LruCache<String, AnnotatedString>(256)
+
 fun parseMarkdown(content: String): List<MarkdownElement> {
+    if (content.isEmpty()) return emptyList()
+    markdownBlockCache.get(content)?.let { return it }
+
+    // Incremental fast-path for LLM streaming: reuse cached parsed prefix up to last safe block boundary.
+    val splitIdx = findLastSafeBlockBoundary(content)
+    if (splitIdx > 0) {
+        val prefix = content.substring(0, splitIdx)
+        val cachedPrefix = markdownBlockCache.get(prefix)
+        if (cachedPrefix != null) {
+            val tail = content.substring(splitIdx)
+            val tailElements = parseMarkdownUncached(tail)
+            val combined = ArrayList<MarkdownElement>(cachedPrefix.size + tailElements.size).apply {
+                addAll(cachedPrefix)
+                addAll(tailElements)
+            }
+            markdownBlockCache.put(content, combined)
+            return combined
+        } else {
+            val prefixElements = parseMarkdownUncached(prefix)
+            markdownBlockCache.put(prefix, prefixElements)
+            val tail = content.substring(splitIdx)
+            val tailElements = parseMarkdownUncached(tail)
+            val combined = ArrayList<MarkdownElement>(prefixElements.size + tailElements.size).apply {
+                addAll(prefixElements)
+                addAll(tailElements)
+            }
+            markdownBlockCache.put(content, combined)
+            return combined
+        }
+    }
+
+    val parsed = parseMarkdownUncached(content)
+    markdownBlockCache.put(content, parsed)
+    return parsed
+}
+
+private fun findLastSafeBlockBoundary(content: String): Int {
+    val lastBreak = content.lastIndexOf("\n\n")
+    if (lastBreak <= 0) return -1
+    var fenceCount = 0
+    var idx = 0
+    while (idx < lastBreak) {
+        val lineEnd = content.indexOf('\n', idx).let { if (it == -1 || it > lastBreak) lastBreak else it }
+        var p = idx
+        while (p < lineEnd && (content[p] == ' ' || content[p] == '\t')) p++
+        if (p + 2 < lineEnd && content[p] == '`' && content[p + 1] == '`' && content[p + 2] == '`') {
+            fenceCount++
+        }
+        idx = lineEnd + 1
+    }
+    return if (fenceCount % 2 == 0) lastBreak + 2 else -1
+}
+
+private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
     val elements = mutableListOf<MarkdownElement>()
     val lines = content.lines()
     var i = 0
@@ -168,7 +226,11 @@ fun parseInlineMarkdown(
     codeBgColor: Color = Color(0x2B888888),
     codeTextColor: Color = Color.Unspecified
 ): AnnotatedString {
-    return buildAnnotatedString {
+    if (text.isEmpty()) return AnnotatedString("")
+    val cacheKey = "${primaryColor.value}:${codeBgColor.value}:${codeTextColor.value}:$text"
+    inlineMarkdownCache.get(cacheKey)?.let { return it }
+
+    val result = buildAnnotatedString {
         var cursor = 0
         val matches = INLINE_TOKEN_REGEX.findAll(text)
 
@@ -233,6 +295,8 @@ fun parseInlineMarkdown(
             append(text.substring(cursor))
         }
     }
+    inlineMarkdownCache.put(cacheKey, result)
+    return result
 }
 
 @Composable

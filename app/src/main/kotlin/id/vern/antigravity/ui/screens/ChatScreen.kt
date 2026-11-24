@@ -440,7 +440,7 @@ fun ChatScreen(
 
     LaunchedEffect(lastMessageContentLength, lastMessageThinkingLength, lastMessageStepsCount, isExecuting) {
         if (isExecuting && messages.isNotEmpty() && !listState.isScrollInProgress) {
-            kotlinx.coroutines.delay(200)
+            kotlinx.coroutines.delay(64)
             runCatching {
                 listState.scrollToItem(messages.size)
             }
@@ -1525,6 +1525,19 @@ fun ChatScreen(
                                 }
                             }
                         } else {
+                            val stableOnOpenFile: (String) -> Unit = remember {
+                                { path: String ->
+                                    fileToOpenInEditor = path
+                                    detailsBottomSheetTab = 3
+                                    showDetailsBottomSheet = true
+                                }
+                            }
+                            val stableOnOpenTerminal: (String) -> Unit = remember(viewModel) {
+                                { cmd: String -> viewModel.requestOpenTerminal(cmd) }
+                            }
+                            val stableOnUndoPrompt: (id.vern.antigravity.data.ChatMessage) -> Unit = remember(viewModel, context) {
+                                { userMsg: id.vern.antigravity.data.ChatMessage -> viewModel.undoPrompt(context, userMsg) }
+                            }
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier
@@ -1534,26 +1547,22 @@ fun ChatScreen(
                                 val executingUserMsgIndex = if (isExecuting) messages.indexOfLast { it.role == MessageRole.USER } else -1
 
                                 if (executingUserMsgIndex != -1 && isExecuting) {
-                                    items(messages.subList(0, executingUserMsgIndex), key = { it.id }) { message ->
+                                    items(
+                                        items = messages.subList(0, executingUserMsgIndex),
+                                        key = { it.id },
+                                        contentType = { it.role }
+                                    ) { message ->
                                         ChatBubble(
                                             message = message,
                                             verboseThinking = verboseThinking,
-                                            onOpenFile = { path ->
-                                                fileToOpenInEditor = path
-                                                detailsBottomSheetTab = 3
-                                                showDetailsBottomSheet = true
-                                            },
-                                            onOpenTerminal = { cmd ->
-                                                viewModel.requestOpenTerminal(cmd)
-                                            },
-                                            onUndoPrompt = { userMsg ->
-                                                viewModel.undoPrompt(context, userMsg)
-                                            },
+                                            onOpenFile = stableOnOpenFile,
+                                            onOpenTerminal = stableOnOpenTerminal,
+                                            onUndoPrompt = stableOnUndoPrompt,
                                             isExecuting = isExecuting
                                         )
                                     }
 
-                                    stickyHeader(key = messages[executingUserMsgIndex].id) {
+                                    stickyHeader(key = messages[executingUserMsgIndex].id, contentType = "sticky_user") {
                                         val userMsg = messages[executingUserMsgIndex]
                                         Box(
                                             modifier = Modifier
@@ -1563,57 +1572,41 @@ fun ChatScreen(
                                             ChatBubble(
                                                 message = userMsg,
                                                 verboseThinking = verboseThinking,
-                                                onOpenFile = { path ->
-                                                    fileToOpenInEditor = path
-                                                    detailsBottomSheetTab = 3
-                                                    showDetailsBottomSheet = true
-                                                },
-                                                onOpenTerminal = { cmd ->
-                                                    viewModel.requestOpenTerminal(cmd)
-                                                },
-                                                onUndoPrompt = { userMsgToUndo ->
-                                                    viewModel.undoPrompt(context, userMsgToUndo)
-                                                },
+                                                onOpenFile = stableOnOpenFile,
+                                                onOpenTerminal = stableOnOpenTerminal,
+                                                onUndoPrompt = stableOnUndoPrompt,
                                                 isPinnedExecuting = true,
                                                 isExecuting = isExecuting
                                             )
                                         }
                                     }
 
-                                    items(messages.subList(executingUserMsgIndex + 1, messages.size), key = { it.id }) { message ->
+                                    items(
+                                        items = messages.subList(executingUserMsgIndex + 1, messages.size),
+                                        key = { it.id },
+                                        contentType = { it.role }
+                                    ) { message ->
                                         ChatBubble(
                                             message = message,
                                             verboseThinking = verboseThinking,
-                                            onOpenFile = { path ->
-                                                fileToOpenInEditor = path
-                                                detailsBottomSheetTab = 3
-                                                showDetailsBottomSheet = true
-                                            },
-                                            onOpenTerminal = { cmd ->
-                                                viewModel.requestOpenTerminal(cmd)
-                                            },
-                                            onUndoPrompt = { userMsg ->
-                                                viewModel.undoPrompt(context, userMsg)
-                                            },
+                                            onOpenFile = stableOnOpenFile,
+                                            onOpenTerminal = stableOnOpenTerminal,
+                                            onUndoPrompt = stableOnUndoPrompt,
                                             isExecuting = isExecuting
                                         )
                                     }
                                 } else {
-                                    items(messages, key = { it.id }) { message ->
+                                    items(
+                                        items = messages,
+                                        key = { it.id },
+                                        contentType = { it.role }
+                                    ) { message ->
                                         ChatBubble(
                                             message = message,
                                             verboseThinking = verboseThinking,
-                                            onOpenFile = { path ->
-                                                fileToOpenInEditor = path
-                                                detailsBottomSheetTab = 3
-                                                showDetailsBottomSheet = true
-                                            },
-                                            onOpenTerminal = { cmd ->
-                                                viewModel.requestOpenTerminal(cmd)
-                                            },
-                                            onUndoPrompt = { userMsg ->
-                                                viewModel.undoPrompt(context, userMsg)
-                                            },
+                                            onOpenFile = stableOnOpenFile,
+                                            onOpenTerminal = stableOnOpenTerminal,
+                                            onUndoPrompt = stableOnUndoPrompt,
                                             isExecuting = isExecuting
                                         )
                                     }

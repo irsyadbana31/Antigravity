@@ -133,7 +133,14 @@ object ConversationPersistence {
                 }
                 array.put(obj)
             }
-            file.writeText(array.toString())
+            val tmpFile = File(convDir, "$conversationId.json.tmp")
+            tmpFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.write(array.toString())
+            }
+            if (!tmpFile.renameTo(file)) {
+                tmpFile.copyTo(file, overwrite = true)
+                tmpFile.delete()
+            }
         } catch (e: Exception) {
             Log.w("ConversationPersistence", "Failed saving messages for conversation $conversationId: ${e.message}")
         }

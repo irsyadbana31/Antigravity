@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Process
 import android.util.Log
 import id.vern.antigravity.ui.CrashHandlerActivity
+import id.vern.antigravity.util.StorageMaintenance
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -26,6 +27,9 @@ class AntigravityApp : Application() {
         super.onCreate()
         instance = this
         setupCrashHandler()
+        if (!isCrashHandlerProcess()) {
+            StorageMaintenance.scheduleStartupCleanup(this)
+        }
         Log.i(TAG, "Antigravity App initialized with crash handler.")
     }
 

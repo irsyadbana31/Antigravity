@@ -32,17 +32,28 @@ jobs:
         run: chmod +x gradlew
 
       - name: Setup Signing Keystore
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > app/KuatoDev.jks
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > app/KuatoDev.jks
+            echo "SIGNING_STORE_PASSWORD=${{ secrets.SIGNING_STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "SIGNING_KEY_ALIAS=${{ secrets.SIGNING_KEY_ALIAS }}" >> $GITHUB_ENV
+            echo "SIGNING_KEY_PASSWORD=${{ secrets.SIGNING_KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            keytool -genkeypair -v \
+              -keystore app/KuatoDev.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias turbo \
+              -storepass turbotest123 \
+              -keypass turbotest123 \
+              -dname "CN=Antigravity Turbo, OU=Dev, O=Turbo, L=ID, S=ID, C=ID"
+            echo "SIGNING_STORE_PASSWORD=turbotest123" >> $GITHUB_ENV
+            echo "SIGNING_KEY_ALIAS=turbo" >> $GITHUB_ENV
+            echo "SIGNING_KEY_PASSWORD=turbotest123" >> $GITHUB_ENV
+          fi
 
       - name: Compile Release APK
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload Release APK Artifact
