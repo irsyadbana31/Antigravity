@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.OutputStreamWriter
+import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.Socket
 import java.net.URL
@@ -33,9 +34,13 @@ import javax.net.ssl.X509TrustManager
 
 object CloudCodeQuotaService {
     private const val TAG = "CloudCodeQuota"
-    private const val QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-    private const val MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
-    private const val TIER_URL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    private val CLOUDCODE_API_BASES = listOf(
+        "https://daily-cloudcode-pa.googleapis.com",
+        "https://cloudcode-pa.googleapis.com"
+    )
+    private const val QUOTA_PATH = "/v1internal:retrieveUserQuotaSummary"
+    private const val MODELS_PATH = "/v1internal:fetchAvailableModels"
+    private const val TIER_PATH = "/v1internal:loadCodeAssist"
 
     private val cachedSslContext: SSLContext? by lazy {
         try {
@@ -100,8 +105,33 @@ object CloudCodeQuotaService {
         } ?: "curl"
     }
 
+    private fun createCurlProcessBuilder(context: Context?, vararg command: String): ProcessBuilder {
+        val pb = ProcessBuilder(*command).redirectErrorStream(true)
+        val env = pb.environment()
+        env.remove("LD_PRELOAD")
+        if (context != null) {
+            val prefix = File(context.filesDir, "usr")
+            val prefixLib = File(prefix, "lib")
+            if (prefixLib.isDirectory) {
+                env["PREFIX"] = prefix.absolutePath
+                env["LD_LIBRARY_PATH"] = "${prefixLib.absolutePath}:/system/lib64"
+            }
+            val certFile = File(prefix, "etc/tls/cert.pem")
+            if (certFile.isFile) {
+                env["SSL_CERT_FILE"] = certFile.absolutePath
+                env["CURL_CA_BUNDLE"] = certFile.absolutePath
+            }
+            val opensslConf = File(prefix, "etc/tls/openssl.cnf")
+            if (opensslConf.isFile) {
+                env["OPENSSL_CONF"] = opensslConf.absolutePath
+            }
+        }
+        return pb
+    }
+
     private fun fetchCsrfTokenFromPort(port: Int, context: Context? = null): String? {
         val schemes = listOf("https", "http")
+        var connectionRefused = false
         for (scheme in schemes) {
             try {
                 val sc = cachedSslContext
@@ -125,15 +155,23 @@ object CloudCodeQuotaService {
                     Log.i(TAG, "Discovered live CSRF token from $scheme://127.0.0.1:$port/: $token")
                     return token
                 }
+            } catch (e: ConnectException) {
+                connectionRefused = true
+                break
             } catch (e: Exception) {}
+        }
+
+        if (connectionRefused) {
+            return null
         }
 
         try {
             val curlBin = findCurlBinary(context)
-            val process = ProcessBuilder(
+            val process = createCurlProcessBuilder(
+                context,
                 curlBin, "-k", "-s", "--max-time", "3",
                 "https://127.0.0.1:$port/"
-            ).redirectErrorStream(true).start()
+            ).start()
             val html = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             val tokenRegex = Regex("""\"?csrfToken\"?\s*:\s*\"([^\"]+)\"""")
@@ -237,7 +275,8 @@ object CloudCodeQuotaService {
     private fun queryLocalEndpointViaCurl(port: Int, csrf: String, rpcPath: String = "RetrieveUserQuotaSummary", requestBody: String = "{}", context: Context? = null): String? {
         return try {
             val curlBin = findCurlBinary(context)
-            val process = ProcessBuilder(
+            val process = createCurlProcessBuilder(
+                context,
                 curlBin,
                 "-k", "-s",
                 "--max-time", "5",
@@ -247,7 +286,7 @@ object CloudCodeQuotaService {
                 "-H", "Connect-Protocol-Version: 1",
                 "-d", requestBody,
                 "https://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/$rpcPath"
-            ).redirectErrorStream(true).start()
+            ).start()
             val output = process.inputStream.bufferedReader().use { it.readText() }
             val exitCode = process.waitFor()
             if (exitCode == 0 && output.isNotBlank() && (output.contains("\"groups\"") || output.contains("\"models\""))) {
@@ -868,7 +907,7 @@ object CloudCodeQuotaService {
                         OAuthManager.refreshTokenIfNeeded(context)
                         val token = OAuthManager.getAccessToken(context)
                         if (!token.isNullOrBlank()) {
-                            modelsRespStr = makePostRequest(MODELS_URL, token)
+                            modelsRespStr = makePostRequestWithFallback(MODELS_PATH, token)
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Remote fetchAvailableModels retry failed: ${e.message}")
@@ -885,6 +924,20 @@ object CloudCodeQuotaService {
                     persistEndpoint(port, activeCsrf, context)
                     return summary
                 }
+            }
+        }
+        return null
+    }
+
+    private fun makePostRequestWithFallback(path: String, token: String): String? {
+        for (baseUrl in CLOUDCODE_API_BASES) {
+            try {
+                val resp = makePostRequest("$baseUrl$path", token)
+                if (!resp.isNullOrBlank()) {
+                    return resp
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Request to $baseUrl$path threw exception: ${e.message}")
             }
         }
         return null
@@ -951,24 +1004,26 @@ object CloudCodeQuotaService {
         val token = OAuthManager.getAccessToken(context)
 
         if (!token.isNullOrBlank()) {
-            try {
-                val modelsRespStr = makePostRequest(MODELS_URL, token)
-                val quotaRespStr = makePostRequest(QUOTA_URL, token)
-                if (quotaRespStr != null || modelsRespStr != null) {
-                    val summary = parseQuotaSummaryResponse(
-                        respStr = quotaRespStr ?: "{}",
-                        modelsRespStr = modelsRespStr,
-                        tier = tier,
-                        modelsFetchFailed = modelsRespStr == null,
-                        context = context
-                    )
-                    if (summary != null && summary.groups.isNotEmpty()) {
-                        Log.i(TAG, "Successfully loaded live quota from Google Cloud Code API for current token (${summary.groups.size} groups)")
-                        return@withContext summary
+            for (baseUrl in CLOUDCODE_API_BASES) {
+                try {
+                    val modelsRespStr = makePostRequest("$baseUrl$MODELS_PATH", token)
+                    val quotaRespStr = makePostRequest("$baseUrl$QUOTA_PATH", token)
+                    if (quotaRespStr != null || modelsRespStr != null) {
+                        val summary = parseQuotaSummaryResponse(
+                            respStr = quotaRespStr ?: "{}",
+                            modelsRespStr = modelsRespStr,
+                            tier = tier,
+                            modelsFetchFailed = modelsRespStr == null,
+                            context = context
+                        )
+                        if (summary != null && summary.groups.isNotEmpty()) {
+                            Log.i(TAG, "Successfully loaded live quota from $baseUrl for current token (${summary.groups.size} groups)")
+                            return@withContext summary
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load live quota from $baseUrl: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to load live quota from Google Cloud Code API: ${e.message}")
             }
         }
 
@@ -980,7 +1035,7 @@ object CloudCodeQuotaService {
         val token = OAuthManager.getAccessToken(context) ?: return@withContext null
 
         try {
-            val respStr = makePostRequest(TIER_URL, token) ?: return@withContext null
+            val respStr = makePostRequestWithFallback(TIER_PATH, token) ?: return@withContext null
             val json = JSONObject(respStr)
 
             var curTier = TierInfo()
