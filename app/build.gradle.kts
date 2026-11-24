@@ -23,10 +23,11 @@ android {
 
     defaultConfig {
         applicationId = "id.vern.antigravity"
+        applicationIdSuffix = ".fix"
         minSdk = 26
         targetSdk = 28
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.1-fix"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -90,8 +91,10 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             val releaseSigning = signingConfigs.getByName("release")
-            if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
-                signingConfig = releaseSigning
+            signingConfig = if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+                releaseSigning
+            } else {
+                signingConfigs.getByName("debug")
             }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
