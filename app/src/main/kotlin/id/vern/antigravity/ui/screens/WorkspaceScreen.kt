@@ -16,12 +16,18 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -111,9 +117,15 @@ fun WorkspaceScreen(
 
         if (isWideScreen) {
 
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+            ) {
                 NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .statusBarsPadding(),
                     containerColor = MaterialTheme.colorScheme.surface
                 ) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -169,7 +181,8 @@ fun WorkspaceScreen(
                     Surface(
                         modifier = Modifier
                             .width(260.dp)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            .statusBarsPadding(),
                         color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 1.dp
                     ) {
@@ -184,6 +197,7 @@ fun WorkspaceScreen(
                         modifier = Modifier
                             .weight(1.2f)
                             .fillMaxHeight()
+                            .statusBarsPadding()
                     ) {
                         val activeTab = openTabs.find { it.id == activeTabId }
                         if (activeTab != null) {

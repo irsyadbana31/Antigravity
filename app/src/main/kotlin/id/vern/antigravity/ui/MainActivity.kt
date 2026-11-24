@@ -1,10 +1,15 @@
 package id.vern.antigravity.ui
 
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -44,6 +49,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         viewModel.loadPreferences(this)
         enableEdgeToEdge()
+        updateSystemBarsForOrientation(resources.configuration.orientation)
 
         setContent {
             val appearance by viewModel.appearanceConfig.collectAsStateWithLifecycle()
@@ -119,7 +125,35 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        updateSystemBarsForOrientation(resources.configuration.orientation)
         viewModel.onActivityResume(this)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            updateSystemBarsForOrientation(resources.configuration.orientation)
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateSystemBarsForOrientation(newConfig.orientation)
+    }
+
+    private fun updateSystemBarsForOrientation(orientation: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
     }
 }
 
