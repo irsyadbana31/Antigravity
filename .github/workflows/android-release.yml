@@ -38,16 +38,22 @@ jobs:
         with:
           workspaces: rust_turbo
 
-      - name: Install cargo-ndk
-        uses: taiki-e/install-action@cargo-ndk
-
       - name: Build Rust Native Engine (libantigravity_turbo.so)
         working-directory: rust_turbo
         run: |
           NDK_PATH="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          echo "Using Android NDK at: $NDK_PATH"
-          ANDROID_NDK_HOME="$NDK_PATH" cargo ndk -t arm64-v8a -t armeabi-v7a -o ../app/src/main/jniLibs build --release
-          ls -lh ../app/src/main/jniLibs/arm64-v8a/libantigravity_turbo.so
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "Using Android NDK toolchain at: $TOOLCHAIN"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android26-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="$TOOLCHAIN/llvm-ar"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$TOOLCHAIN/armv7a-linux-androideabi26-clang"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_AR="$TOOLCHAIN/llvm-ar"
+          cargo build --release --target aarch64-linux-android
+          cargo build --release --target armv7-linux-androideabi
+          mkdir -p ../app/src/main/jniLibs/arm64-v8a ../app/src/main/jniLibs/armeabi-v7a
+          cp target/aarch64-linux-android/release/libantigravity_turbo.so ../app/src/main/jniLibs/arm64-v8a/
+          cp target/armv7-linux-androideabi/release/libantigravity_turbo.so ../app/src/main/jniLibs/armeabi-v7a/
+          ls -lh ../app/src/main/jniLibs/arm64-v8a/libantigravity_turbo.so ../app/src/main/jniLibs/armeabi-v7a/libantigravity_turbo.so
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
