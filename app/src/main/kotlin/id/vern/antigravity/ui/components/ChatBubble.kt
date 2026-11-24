@@ -1,5 +1,7 @@
 package id.vern.antigravity.ui.components
 
+import id.vern.antigravity.util.ExternalFileOpener
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -165,7 +167,7 @@ fun ChatBubble(
                                             )
                                             .background(MaterialTheme.colorScheme.surfaceVariant)
                                             .clickable {
-                                                id.vern.antigravity.util.ExternalFileOpener.openAttachment(
+                                                ExternalFileOpener.openAttachment(
                                                     context = context,
                                                     localPath = file.localPath,
                                                     uri = file.uri,
@@ -191,7 +193,7 @@ fun ChatBubble(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
-                                                id.vern.antigravity.util.ExternalFileOpener.openAttachment(
+                                                ExternalFileOpener.openAttachment(
                                                     context = context,
                                                     localPath = file.localPath,
                                                     uri = file.uri,

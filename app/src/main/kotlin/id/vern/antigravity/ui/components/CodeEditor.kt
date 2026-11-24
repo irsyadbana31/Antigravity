@@ -1,5 +1,7 @@
 package id.vern.antigravity.ui.components
 
+import id.vern.antigravity.util.ExternalFileOpener
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -376,7 +378,7 @@ fun CodeEditor(
                                             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
                                                 val url = request?.url?.toString() ?: return false
                                                 if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://")) {
-                                                    return id.vern.antigravity.util.ExternalFileOpener.openUrlOrFile(ctx, url)
+                                                    return ExternalFileOpener.openUrlOrFile(ctx, url)
                                                 }
                                                 return false
                                             }
