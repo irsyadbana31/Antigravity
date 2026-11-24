@@ -44,9 +44,11 @@ import id.vern.antigravity.data.SlashAction
 import id.vern.antigravity.data.SlashCommandParser
 import id.vern.antigravity.data.SYSTEM_SLASH_COMMANDS
 import id.vern.antigravity.data.mergeDynamicSlashActions
+import id.vern.antigravity.service.AgentCompletionNotification
 import id.vern.antigravity.service.AgyModelsService
 import id.vern.antigravity.service.CliModel
 import id.vern.antigravity.service.CloudCodeQuotaService
+import id.vern.antigravity.service.ConversationTitleGenerator
 import id.vern.antigravity.service.PermissionConfigService
 import id.vern.antigravity.service.PermissionGrantsState
 import id.vern.antigravity.service.PermissionRule
@@ -181,6 +183,7 @@ class AntigravityViewModel : ViewModel() {
         const val CLI_MODELS_THROTTLE_MS = 10L * 60L * 1000L
         const val KEY_THINKING_BUDGET = "ag_thinking_budget"
         const val KEY_VERBOSE_THINKING = "ag_verbose_thinking"
+        const val KEY_NOTIFY_ON_COMPLETION = "ag_notify_on_completion"
         const val KEY_CONVERSATION_WIDTH = "ag_conversation_width"
         const val KEY_THEME_PRESET = "ag_theme_preset"
         const val KEY_CUSTOM_THEME_BG = "ag_custom_theme_bg"
@@ -224,6 +227,7 @@ class AntigravityViewModel : ViewModel() {
     val selectedModelCliId: StateFlow<String?> = settingsPreferencesDelegate.selectedModelCliId
     val thinkingBudget: StateFlow<String> = settingsPreferencesDelegate.thinkingBudget
     val verboseThinking: StateFlow<Boolean> = settingsPreferencesDelegate.verboseThinking
+    val notifyOnCompletion: StateFlow<Boolean> = settingsPreferencesDelegate.notifyOnCompletion
     val conversationWidth: StateFlow<String> = settingsPreferencesDelegate.conversationWidth
     val themePreset: StateFlow<String> = settingsPreferencesDelegate.themePreset
     val customThemeBg: StateFlow<String> = settingsPreferencesDelegate.customThemeBg
@@ -555,6 +559,9 @@ class AntigravityViewModel : ViewModel() {
 
     fun setVerboseThinking(context: Context, verbose: Boolean) =
         settingsPreferencesDelegate.setVerboseThinking(context, verbose)
+
+    fun setNotifyOnCompletion(context: Context, enabled: Boolean) =
+        settingsPreferencesDelegate.setNotifyOnCompletion(context, enabled)
 
     fun setConversationWidth(context: Context, width: String) =
         settingsPreferencesDelegate.setConversationWidth(context, width)
@@ -1540,11 +1547,17 @@ class AntigravityViewModel : ViewModel() {
             conversationManagerDelegate.setActiveConversationIdDirect(convId)
         }
 
+        var autoTitleSeed: String? = null
         if (conversationTitle.value == "New Conversation" || conversationTitle.value.isBlank()) {
-            val titleCandidate = content.lines().firstOrNull { it.isNotBlank() }?.trim()?.take(35)
-                ?: currentAttachments.firstOrNull()?.name?.take(35)
-            if (!titleCandidate.isNullOrEmpty()) {
+            val titleCandidate = ConversationTitleGenerator.buildImmediateFallbackTitle(
+                userPrompt = content,
+                attachmentName = currentAttachments.firstOrNull()?.name
+            )
+            if (titleCandidate.isNotBlank() && titleCandidate != "New Conversation") {
                 conversationManagerDelegate.setConversationTitleDirect(titleCandidate)
+                if (isFirstMessage) {
+                    autoTitleSeed = titleCandidate
+                }
             }
         }
 
@@ -1600,7 +1613,7 @@ class AntigravityViewModel : ViewModel() {
             return
         }
 
-        executeAiTurn(context, effectiveContent, convId, currentAttachments)
+        executeAiTurn(context, effectiveContent, convId, currentAttachments, autoTitleSeed)
     }
 
     private val executionWakeLock = WakeLockHolder()
@@ -1667,7 +1680,8 @@ class AntigravityViewModel : ViewModel() {
         context: Context,
         prompt: String,
         convId: String,
-        attachments: List<AttachedFile> = emptyList()
+        attachments: List<AttachedFile> = emptyList(),
+        autoTitleSeed: String? = null
     ) {
         currentAiExecutionJob?.cancel()
         currentAiExecutionJob = viewModelScope.launch(Dispatchers.IO) {
@@ -2433,6 +2447,28 @@ class AntigravityViewModel : ViewModel() {
                             } else msg
                         }
                     }
+
+                    if (notifyOnCompletion.value) {
+                        val activeTitle = conversationHistory.value.firstOrNull { it.id == convId }?.title
+                            ?: conversationTitle.value
+                        AgentCompletionNotification.notifyTurnFinished(
+                            context = context.applicationContext,
+                            conversationTitle = activeTitle,
+                            responsePreview = finalContent,
+                            durationText = durText,
+                            isError = exitCode != 0
+                        )
+                    }
+
+                    if (autoTitleSeed != null && exitCode == 0 && !authRequired && finalContent.isNotBlank()) {
+                        launchContextualAutoTitle(
+                            context = context.applicationContext,
+                            convId = convId,
+                            expectedCurrentTitle = autoTitleSeed,
+                            userPrompt = prompt,
+                            assistantResponse = finalContent
+                        )
+                    }
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) {
@@ -2440,16 +2476,28 @@ class AntigravityViewModel : ViewModel() {
                         list.filter { it.id != assistantMsgId || it.content.isNotBlank() }
                     }
                 } else {
+                    val errorMsg = "Execution error: ${e.message}"
                     mutableChatMessages.update { list ->
                         list.map { msg ->
                             if (msg.id == assistantMsgId) {
                                 msg.copy(
                                     status = MessageStatus.ERROR,
-                                    content = "Execution error: ${e.message}",
+                                    content = errorMsg,
                                     thinking = null
                                 )
                             } else msg
                         }
+                    }
+                    if (notifyOnCompletion.value) {
+                        val activeTitle = conversationHistory.value.firstOrNull { it.id == convId }?.title
+                            ?: conversationTitle.value
+                        AgentCompletionNotification.notifyTurnFinished(
+                            context = context.applicationContext,
+                            conversationTitle = activeTitle,
+                            responsePreview = errorMsg,
+                            durationText = null,
+                            isError = true
+                        )
                     }
                 }
             } finally {
@@ -2467,6 +2515,40 @@ class AntigravityViewModel : ViewModel() {
                 saveMessagesForConversation(context, convId, currentList)
                 processNextQueuedMessage(context)
                 refreshUserQuota(context)
+            }
+        }
+    }
+
+    private fun launchContextualAutoTitle(
+        context: Context,
+        convId: String,
+        expectedCurrentTitle: String,
+        userPrompt: String,
+        assistantResponse: String
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val generated = ConversationTitleGenerator.generateContextualTitle(
+                    context = context,
+                    userPrompt = userPrompt,
+                    assistantResponse = assistantResponse,
+                    availableModels = mutableCliModels.value,
+                    fallbackModelId = selectedModelCliId.value
+                ) ?: return@launch
+
+                val currentStoredTitle = conversationHistory.value.firstOrNull { it.id == convId }?.title
+                if (currentStoredTitle != expectedCurrentTitle) {
+                    return@launch
+                }
+
+                conversationManagerDelegate.renameConversation(
+                    newTitle = generated,
+                    summaryId = convId,
+                    context = context,
+                    onLog = ::addLog
+                )
+            } catch (e: Exception) {
+                addLog("Conversation", "Auto-title skipped: ${e.message}")
             }
         }
     }

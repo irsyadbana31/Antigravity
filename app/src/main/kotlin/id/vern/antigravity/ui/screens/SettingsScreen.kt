@@ -961,6 +961,7 @@ fun GeneralSettingsPage(
     val currentSubPage = pageStack.last()
 
     val queuedMode by viewModel.queuedMessagesMode.collectAsStateWithLifecycle()
+    val notifyOnCompletion by viewModel.notifyOnCompletion.collectAsStateWithLifecycle()
     val securityPreset by viewModel.securityPreset.collectAsStateWithLifecycle()
     val planReviewPolicy by viewModel.planReviewPolicy.collectAsStateWithLifecycle()
     val permissionState by viewModel.permissionState.collectAsStateWithLifecycle()
@@ -1040,6 +1041,34 @@ fun GeneralSettingsPage(
                                         }
                                     }
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_notify_on_completion_title),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_notify_on_completion_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = notifyOnCompletion,
+                                    onCheckedChange = { viewModel.setNotifyOnCompletion(context, it) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AntigravityBlue)
+                                )
                             }
                         }
                     }

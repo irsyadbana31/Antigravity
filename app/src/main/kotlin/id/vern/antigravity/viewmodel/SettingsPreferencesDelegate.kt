@@ -49,6 +49,9 @@ class SettingsPreferencesDelegate {
     private val mutableVerboseThinking = MutableStateFlow(false)
     val verboseThinking: StateFlow<Boolean> = mutableVerboseThinking.asStateFlow()
 
+    private val mutableNotifyOnCompletion = MutableStateFlow(true)
+    val notifyOnCompletion: StateFlow<Boolean> = mutableNotifyOnCompletion.asStateFlow()
+
     private val mutableConversationWidth = MutableStateFlow("Default")
     val conversationWidth: StateFlow<String> = mutableConversationWidth.asStateFlow()
 
@@ -115,6 +118,8 @@ class SettingsPreferencesDelegate {
 
         val budget = prefs.getString(AntigravityViewModel.KEY_THINKING_BUDGET, "") ?: ""
         val verbose = prefs.getBoolean(AntigravityViewModel.KEY_VERBOSE_THINKING, false)
+        val notifyDone = prefs.getBoolean(AntigravityViewModel.KEY_NOTIFY_ON_COMPLETION, true)
+        mutableNotifyOnCompletion.value = notifyDone
         val width = prefs.getString(AntigravityViewModel.KEY_CONVERSATION_WIDTH, "Default") ?: "Default"
         val preset = prefs.getString(AntigravityViewModel.KEY_THEME_PRESET, if (themeMode == ThemeMode.LIGHT) "Default Light" else "Default Dark") ?: "Default Dark"
         val customBg = prefs.getString(AntigravityViewModel.KEY_CUSTOM_THEME_BG, "#101010") ?: "#101010"
@@ -214,6 +219,12 @@ class SettingsPreferencesDelegate {
         mutableVerboseThinking.value = verbose
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_VERBOSE_THINKING, verbose).apply()
+    }
+
+    fun setNotifyOnCompletion(context: Context, enabled: Boolean) {
+        mutableNotifyOnCompletion.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_NOTIFY_ON_COMPLETION, enabled).apply()
     }
 
     fun setConversationWidth(context: Context, width: String) {

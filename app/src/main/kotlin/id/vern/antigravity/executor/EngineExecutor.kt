@@ -1003,6 +1003,117 @@ object EngineExecutor {
         } catch (e: Exception) {}
     }
 
+    suspend fun runAgyQuickPrint(
+        context: Context,
+        prompt: String,
+        cliModelId: String? = null,
+        timeoutMs: Long = 15_000L
+    ): String? = withContext(Dispatchers.IO) {
+        healEnvironment(context)
+
+        val filesDir = context.filesDir
+        val homeDir = File(filesDir, "home").apply { mkdirs() }
+        val tmpDir = File(filesDir, "tmp").apply { mkdirs() }
+        val engineDir = File(filesDir, "engine")
+        val prefixDir = File(filesDir, "usr")
+        val prefixLib = File(prefixDir, "lib")
+        val libDir = File(engineDir, "glibc/lib")
+        val ldBin = File(libDir, "ld-linux-aarch64.so.1")
+        val agyBin = File(engineDir, "bin/agy")
+        val certFile = File(prefixDir, "etc/tls/cert.pem")
+
+        if (!ldBin.exists() || !agyBin.exists()) return@withContext null
+
+        val libraryPaths = listOf(libDir.absolutePath, prefixLib.absolutePath)
+            .filter { File(it).exists() }
+            .joinToString(":")
+
+        val cmdList = mutableListOf(
+            ldBin.absolutePath,
+            "--library-path",
+            libraryPaths,
+            agyBin.absolutePath,
+            "--print",
+            "--output-format", "text",
+            "--disable-slash-commands",
+            "--effort", "low"
+        )
+        if (!cliModelId.isNullOrBlank()) {
+            cmdList.add("--model")
+            cmdList.add(cliModelId)
+        }
+        cmdList.add(prompt)
+
+        val pb = ProcessBuilder(cmdList)
+        pb.directory(homeDir)
+
+        val env = pb.environment()
+        env.remove("LD_PRELOAD")
+        env["PREFIX"] = prefixDir.absolutePath
+        env["HOME"] = homeDir.absolutePath
+        env["TMPDIR"] = tmpDir.absolutePath
+        env["PWD"] = homeDir.absolutePath
+        env["TERM"] = "dumb"
+        env["LANG"] = "en_US.UTF-8"
+        env["PATH"] = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}:/system/bin"
+        env["LD_LIBRARY_PATH"] = "${prefixLib.absolutePath}:/system/lib64"
+        if (certFile.exists()) {
+            env["SSL_CERT_FILE"] = certFile.absolutePath
+            env["CURL_CA_BUNDLE"] = certFile.absolutePath
+        }
+        env["GODEBUG"] = "netdns=cgo"
+        env["AGY_APPLICATION_ID"] = context.packageName
+        env["APPLICATION_ID"] = context.packageName
+        env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+
+        val process = try {
+            pb.start()
+        } catch (_: Exception) {
+            return@withContext null
+        }
+
+        val outputSb = StringBuilder()
+        val stdoutThread = Thread {
+            try {
+                BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        if (outputSb.isNotEmpty()) outputSb.append("\n")
+                        outputSb.append(line)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        val stderrThread = Thread {
+            try {
+                process.errorStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            } catch (_: Exception) {}
+        }
+
+        stdoutThread.start()
+        stderrThread.start()
+        try {
+            process.outputStream.close()
+        } catch (_: Exception) {}
+
+        val finished = try {
+            process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            false
+        }
+
+        if (!finished) {
+            try { process.destroyForcibly() } catch (_: Exception) {}
+            return@withContext null
+        }
+
+        try { stdoutThread.join(1000) } catch (_: Exception) {}
+        try { stderrThread.join(500) } catch (_: Exception) {}
+
+        val result = outputSb.toString().trim()
+        if (process.exitValue() == 0 && result.isNotBlank()) result else null
+    }
+
     private fun copyAssetFile(context: Context, assetPath: String, dest: File) {
         try {
             dest.parentFile?.mkdirs()

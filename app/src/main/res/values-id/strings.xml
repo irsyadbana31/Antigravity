@@ -643,5 +643,12 @@
     <string name="model_toast_requires_pro">%1$s memerlukan langganan Google AI Pro</string>
     <string name="model_toast_requires_ultra">%1$s memerlukan langganan Google AI Ultra</string>
     <string name="workspace_label">Ruang Kerja: %1$s</string>
+    <string name="agent_done_notification_channel_name">Respons Agen</string>
+    <string name="agent_done_notification_channel_desc">Notifikasi saat Antigravity selesai berpikir di latar belakang</string>
+    <string name="agent_done_notification_title">Antigravity selesai</string>
+    <string name="agent_done_notification_title_duration">Antigravity selesai · %1$s</string>
+    <string name="agent_error_notification_title">Antigravity · Gagal</string>
+    <string name="settings_notify_on_completion_title">Notifikasi saat selesai merespons</string>
+    <string name="settings_notify_on_completion_desc">Kirim notifikasi saat Antigravity selesai berpikir ketika aplikasi di latar belakang atau layar mati.</string>
 </resources>
 

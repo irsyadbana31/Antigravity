@@ -26,8 +26,8 @@ android {
         applicationIdSuffix = ".turbo"
         minSdk = 26
         targetSdk = 28
-        versionCode = 6
-        versionName = "1.0.4-turbo"
+        versionCode = 7
+        versionName = "1.0.5-turbo"
 
         vectorDrawables {
             useSupportLibrary = true
