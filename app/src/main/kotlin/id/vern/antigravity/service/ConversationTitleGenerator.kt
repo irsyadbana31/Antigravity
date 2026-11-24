@@ -35,18 +35,18 @@ object ConversationTitleGenerator {
         if (availableModels.isEmpty()) return cleanedFallback
 
         val flashLite = availableModels.firstOrNull { m ->
-            val hay = "${m.id} ${m.displayName}".lowercase()
+            val hay = "${m.cliId} ${m.displayName}".lowercase()
             hay.contains("flash-lite") || hay.contains("flash_lite") || hay.contains("flash lite")
         }
-        if (flashLite != null) return AgyModelsService.cleanModelId(flashLite.id)
+        if (flashLite != null) return AgyModelsService.cleanModelId(flashLite.cliId)
 
         val flash = availableModels.firstOrNull { m ->
-            val hay = "${m.id} ${m.displayName}".lowercase()
+            val hay = "${m.cliId} ${m.displayName}".lowercase()
             hay.contains("flash")
         }
-        if (flash != null) return AgyModelsService.cleanModelId(flash.id)
+        if (flash != null) return AgyModelsService.cleanModelId(flash.cliId)
 
-        return cleanedFallback ?: AgyModelsService.cleanModelId(availableModels.first().id)
+        return cleanedFallback ?: AgyModelsService.cleanModelId(availableModels.first().cliId)
     }
 
     suspend fun generateContextualTitle(
