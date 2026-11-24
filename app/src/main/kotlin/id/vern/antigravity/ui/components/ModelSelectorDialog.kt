@@ -172,7 +172,7 @@ internal fun getModelQuotaPercentage(
             val b = fiveHB ?: weeklyB
             Pair(b?.percentage, b?.subtext)
         }
-        modelId.contains("Hydrogen", ignoreCase = true) || modelId.contains("Carbon", ignoreCase = true) || modelId.contains("Gemini", ignoreCase = true) -> {
+        modelId.contains("Hydrogen", ignoreCase = true) || modelId.contains("Carbon", ignoreCase = true) || modelId.contains("Orchestrator", ignoreCase = true) || modelId.contains("Gemini", ignoreCase = true) -> {
             val weeklyB = geminiGroup?.buckets?.firstOrNull { it.window.equals("weekly", ignoreCase = true) || it.bucketId.contains("weekly", ignoreCase = true) }
                 ?: geminiGroup?.buckets?.firstOrNull()
             val sub = weeklyB?.subtext ?: matchingAvail?.resetTime?.let { id.vern.antigravity.service.CloudCodeQuotaService.formatSubtext(it) }

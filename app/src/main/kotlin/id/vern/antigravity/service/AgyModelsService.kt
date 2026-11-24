@@ -68,7 +68,14 @@ object AgyModelsService {
     }
 
     fun providerForDisplayName(displayName: String): String = when {
-        displayName.startsWith("Gemini", ignoreCase = true) || displayName.contains("gemini", ignoreCase = true) || displayName.contains("google", ignoreCase = true) || displayName.contains("argon", ignoreCase = true) || displayName.contains("hydrogen", ignoreCase = true) || displayName.contains("neon", ignoreCase = true) -> "Google"
+        displayName.startsWith("Gemini", ignoreCase = true) ||
+            displayName.contains("gemini", ignoreCase = true) ||
+            displayName.contains("google", ignoreCase = true) ||
+            displayName.contains("argon", ignoreCase = true) ||
+            displayName.contains("hydrogen", ignoreCase = true) ||
+            displayName.contains("neon", ignoreCase = true) ||
+            displayName.contains("carbon", ignoreCase = true) ||
+            displayName.contains("orchestrator", ignoreCase = true) -> "Google"
         displayName.startsWith("Claude", ignoreCase = true) || displayName.contains("claude", ignoreCase = true) || displayName.contains("anthropic", ignoreCase = true) -> "Anthropic"
         displayName.startsWith("GPT", ignoreCase = true) || displayName.contains("gpt", ignoreCase = true) || displayName.contains("openai", ignoreCase = true) -> "OpenAI"
         else -> ""

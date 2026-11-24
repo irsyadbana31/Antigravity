@@ -39,6 +39,7 @@ data class AvailableModelInfo(
                 (query.contains("Hydrogen", ignoreCase = true) && (modelId.contains("Hydrogen", ignoreCase = true) || displayName.contains("Hydrogen", ignoreCase = true))) ||
                 (query.contains("Argon", ignoreCase = true) && (modelId.contains("Argon", ignoreCase = true) || displayName.contains("Argon", ignoreCase = true))) ||
                 (query.contains("Carbon", ignoreCase = true) && (modelId.contains("Carbon", ignoreCase = true) || displayName.contains("Carbon", ignoreCase = true))) ||
+                (query.contains("Orchestrator", ignoreCase = true) && (modelId.contains("Orchestrator", ignoreCase = true) || displayName.contains("Orchestrator", ignoreCase = true))) ||
                 (query.contains("Sonnet", ignoreCase = true) && (modelId.contains("Sonnet", ignoreCase = true) || displayName.contains("Sonnet", ignoreCase = true) || modelId.equals("Claude", ignoreCase = true))) ||
                 (query.contains("Opus", ignoreCase = true) && (modelId.contains("Opus", ignoreCase = true) || displayName.contains("Opus", ignoreCase = true) || modelId.equals("Claude", ignoreCase = true))) ||
                 (query.contains("GPT", ignoreCase = true) && (modelId.contains("GPT", ignoreCase = true) || displayName.contains("GPT", ignoreCase = true)))
