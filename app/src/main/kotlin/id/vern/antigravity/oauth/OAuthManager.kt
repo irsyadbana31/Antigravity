@@ -756,7 +756,7 @@ migrations:  {
       if (e) e.preventDefault();
       window.location.href = "antigravity://open";
       setTimeout(function() {
-        window.location.href = "intent://open#Intent;scheme=antigravity;package=id.vern.antigravity;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;end";
+        window.location.href = "intent://open#Intent;scheme=antigravity;package=${context.packageName};action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;end";
       }, 300);
     }
     setTimeout(function() {

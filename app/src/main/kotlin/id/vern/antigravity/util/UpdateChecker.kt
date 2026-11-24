@@ -30,7 +30,7 @@ class UpdateChecker(private val context: Context) {
     companion object {
         const val OTA_NOTIFICATION_CHANNEL_ID = "ota_updates_channel"
         const val OTA_NOTIFICATION_ID = 1009
-        const val GITHUB_OWNER = "KuatoDev"
+        const val GITHUB_OWNER = "irsyadbana31"
         const val GITHUB_REPO = "Antigravity"
     }
 
@@ -290,8 +290,8 @@ class UpdateChecker(private val context: Context) {
 
     private fun isNewerVersion(currentVersion: String, remoteVersion: String): Boolean {
         try {
-            val cleanCurrent = currentVersion.lowercase().replace("v", "")
-            val cleanRemote = remoteVersion.lowercase().replace("v", "")
+            val cleanCurrent = currentVersion.lowercase().removePrefix("v").substringBefore("-")
+            val cleanRemote = remoteVersion.lowercase().removePrefix("v").substringBefore("-")
             val currentParts = cleanCurrent.split(".")
             val remoteParts = cleanRemote.split(".")
             val maxLength = maxOf(currentParts.size, remoteParts.size)
@@ -303,7 +303,7 @@ class UpdateChecker(private val context: Context) {
             }
             return false
         } catch (e: Exception) {
-            return remoteVersion.replace("v", "") > currentVersion.replace("v", "")
+            return remoteVersion.removePrefix("v").substringBefore("-") > currentVersion.removePrefix("v").substringBefore("-")
         }
     }
 

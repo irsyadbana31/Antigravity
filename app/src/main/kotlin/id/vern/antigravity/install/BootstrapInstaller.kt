@@ -586,7 +586,7 @@ object BootstrapInstaller {
             export CURL_CA_BUNDLE="$certPath"
             export GIT_SSL_CAINFO="$certPath"
             export OPENSSL_CONF="${prefix.absolutePath}/etc/tls/openssl.cnf"
-            export GODEBUG="netdns=go"
+            export GODEBUG="netdns=cgo"
             export GIT_CONFIG_NOSYSTEM=1
             export GIT_ATTR_NOSYSTEM=1
             export GIT_TERMINAL_PROMPT=0
@@ -609,34 +609,32 @@ object BootstrapInstaller {
     fun patchGlibcResolvConf(context: Context, engineDir: File) {
         val filesDir = context.filesDir
         val resolvFile = File(filesDir, "resolv.conf")
+        val shortResolvFile = File(filesDir, "r")
         val resolvContent = "nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n"
         val hostsFile = File(filesDir, "hosts")
+        val shortHostsFile = File(filesDir, "h")
         val hostsContent = "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n"
         try {
-            resolvFile.writeText(resolvContent, Charsets.UTF_8)
-            resolvFile.setReadable(true, false)
-            File(File(filesDir, "home"), "resolv.conf").apply {
-                parentFile?.mkdirs()
-                writeText(resolvContent, Charsets.UTF_8)
-                setReadable(true, false)
-            }
-            File(File(filesDir, "usr/etc"), "resolv.conf").apply {
-                parentFile?.mkdirs()
-                writeText(resolvContent, Charsets.UTF_8)
-                setReadable(true, false)
+            listOf(
+                resolvFile,
+                shortResolvFile,
+                File(File(filesDir, "home"), "resolv.conf"),
+                File(File(filesDir, "usr/etc"), "resolv.conf")
+            ).forEach { f ->
+                f.parentFile?.mkdirs()
+                f.writeText(resolvContent, Charsets.UTF_8)
+                f.setReadable(true, false)
             }
 
-            hostsFile.writeText(hostsContent, Charsets.UTF_8)
-            hostsFile.setReadable(true, false)
-            File(File(filesDir, "home"), "hosts").apply {
-                parentFile?.mkdirs()
-                writeText(hostsContent, Charsets.UTF_8)
-                setReadable(true, false)
-            }
-            File(File(filesDir, "usr/etc"), "hosts").apply {
-                parentFile?.mkdirs()
-                writeText(hostsContent, Charsets.UTF_8)
-                setReadable(true, false)
+            listOf(
+                hostsFile,
+                shortHostsFile,
+                File(File(filesDir, "home"), "hosts"),
+                File(File(filesDir, "usr/etc"), "hosts")
+            ).forEach { f ->
+                f.parentFile?.mkdirs()
+                f.writeText(hostsContent, Charsets.UTF_8)
+                f.setReadable(true, false)
             }
         } catch (e: Exception) {}
 
@@ -658,8 +656,24 @@ object BootstrapInstaller {
             } catch (e: Exception) {}
         }
 
+        val targetResolv = "/data/data/com.termux/files/usr/glibc/etc/resolv.conf".toByteArray(Charsets.US_ASCII)
+        val chosenResolvPath = listOf(
+            resolvFile.absolutePath,
+            shortResolvFile.absolutePath,
+            "/data/data/${context.packageName}/files/r"
+        ).firstOrNull { it.toByteArray(Charsets.US_ASCII).size <= targetResolv.size }
+
+        val targetHosts = "/data/data/com.termux/files/usr/glibc/etc/hosts\u0000".toByteArray(Charsets.US_ASCII)
+        val chosenHostsPath = listOf(
+            hostsFile.absolutePath,
+            shortHostsFile.absolutePath,
+            "/data/data/${context.packageName}/files/h",
+            "/etc/hosts"
+        ).firstOrNull { it.toByteArray(Charsets.US_ASCII).size + 1 <= targetHosts.size } ?: "/etc/hosts"
+
         val candidateLibcFiles = listOf(
             File(engineDir, "glibc/lib/libc.so.6"),
+            File(engineDir, "glibc/lib/libresolv.so.2"),
             File(engineDir, "lib/libc.so.6"),
             File(filesDir, "runtime/lib/libc.so.6"),
             File(filesDir, "tmp/engine/glibc/lib/libc.so.6")
@@ -669,26 +683,22 @@ object BootstrapInstaller {
             try {
                 var modified = false
 
-                val targetResolv = "/data/data/com.termux/files/usr/glibc/etc/resolv.conf".toByteArray(Charsets.US_ASCII)
-                val replacementResolv = resolvFile.absolutePath.toByteArray(Charsets.US_ASCII)
-                if (replacementResolv.size <= targetResolv.size) {
+                if (chosenResolvPath != null) {
+                    val replacementResolv = chosenResolvPath.toByteArray(Charsets.US_ASCII)
                     val repBytes = ByteArray(targetResolv.size)
                     System.arraycopy(replacementResolv, 0, repBytes, 0, replacementResolv.size)
                     if (patchFileInPlace(libcFile, targetResolv, repBytes, replaceAll = false)) {
                         modified = true
-                        Log.i(TAG, "Successfully patched ${libcFile.name} resolv.conf path to ${resolvFile.absolutePath}")
+                        Log.i(TAG, "Successfully patched ${libcFile.name} resolv.conf path to $chosenResolvPath")
                     }
                 }
 
-                val targetHosts = "/data/data/com.termux/files/usr/glibc/etc/hosts\u0000".toByteArray(Charsets.US_ASCII)
-                val replacementHosts = hostsFile.absolutePath.toByteArray(Charsets.US_ASCII)
-                if (replacementHosts.size + 1 <= targetHosts.size) {
-                    val repBytes = ByteArray(targetHosts.size)
-                    System.arraycopy(replacementHosts, 0, repBytes, 0, replacementHosts.size)
-                    if (patchFileInPlace(libcFile, targetHosts, repBytes, replaceAll = false)) {
-                        modified = true
-                        Log.i(TAG, "Successfully patched ${libcFile.name} hosts path to ${hostsFile.absolutePath}")
-                    }
+                val replacementHosts = chosenHostsPath.toByteArray(Charsets.US_ASCII)
+                val repBytes = ByteArray(targetHosts.size)
+                System.arraycopy(replacementHosts, 0, repBytes, 0, replacementHosts.size)
+                if (patchFileInPlace(libcFile, targetHosts, repBytes, replaceAll = false)) {
+                    modified = true
+                    Log.i(TAG, "Successfully patched ${libcFile.name} hosts path to $chosenHostsPath")
                 }
 
                 if (modified) {

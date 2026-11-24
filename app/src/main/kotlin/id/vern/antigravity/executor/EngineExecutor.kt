@@ -635,15 +635,19 @@ object EngineExecutor {
                 }
             }
 
-            val resolvFile = File(filesDir, "resolv.conf")
-            if (!resolvFile.exists() || resolvFile.length() == 0L) {
-                resolvFile.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n", Charsets.UTF_8)
-                resolvFile.setReadable(true, false)
+            val resolvContent = "nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n"
+            listOf(File(filesDir, "resolv.conf"), File(filesDir, "r")).forEach { resolvFile ->
+                if (!resolvFile.exists() || resolvFile.length() == 0L) {
+                    resolvFile.writeText(resolvContent, Charsets.UTF_8)
+                    resolvFile.setReadable(true, false)
+                }
             }
-            val hostsFile = File(filesDir, "hosts")
-            if (!hostsFile.exists() || hostsFile.length() == 0L) {
-                hostsFile.writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n", Charsets.UTF_8)
-                hostsFile.setReadable(true, false)
+            val hostsContent = "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n"
+            listOf(File(filesDir, "hosts"), File(filesDir, "h")).forEach { hostsFile ->
+                if (!hostsFile.exists() || hostsFile.length() == 0L) {
+                    hostsFile.writeText(hostsContent, Charsets.UTF_8)
+                    hostsFile.setReadable(true, false)
+                }
             }
             isEnvironmentHealed = true
         } catch (e: Exception) {}
