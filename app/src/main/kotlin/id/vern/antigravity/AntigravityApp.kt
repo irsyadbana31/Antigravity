@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Process
 import android.util.Log
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.ui.CrashHandlerActivity
 import id.vern.antigravity.util.StorageMaintenance
 import java.io.File
@@ -29,6 +30,7 @@ class AntigravityApp : Application() {
         setupCrashHandler()
         if (!isCrashHandlerProcess()) {
             StorageMaintenance.scheduleStartupCleanup(this)
+            Log.i(TAG, "Turbo native engine: ${RustTurboBridge.statusSummary()}")
         }
         Log.i(TAG, "Antigravity App initialized with crash handler.")
     }

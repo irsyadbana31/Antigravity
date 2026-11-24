@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.ui.theme.AntigravityBlue
 
 sealed class MarkdownElement {
@@ -128,6 +129,7 @@ private fun findLastSafeBlockBoundary(content: String): Int {
 }
 
 private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
+    RustTurboBridge.parseMarkdownNative(content)?.let { return it }
     val elements = mutableListOf<MarkdownElement>()
     val lines = content.lines()
     var i = 0

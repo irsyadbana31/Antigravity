@@ -2,6 +2,7 @@
 -keep class id.vern.antigravity.service.** { *; }
 -keep class id.vern.antigravity.oauth.** { *; }
 -keep class id.vern.antigravity.install.** { *; }
+-keep class id.vern.antigravity.nativebridge.** { *; }
 
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.SerializationKt
