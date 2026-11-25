@@ -45,6 +45,8 @@ object CloudCodeQuotaService {
     private const val QUOTA_PATH = "/v1internal:retrieveUserQuotaSummary"
     private const val MODELS_PATH = "/v1internal:fetchAvailableModels"
     private const val TIER_PATH = "/v1internal:loadCodeAssist"
+    private const val GENERATE_CONTENT_PATH = "/v1internal:generateContent"
+    private val TITLE_LIGHTWEIGHT_MODELS = listOf("gemini-2.5-flash-lite", "gemini-2.5-flash")
     internal const val TIER_CACHE_TTL_MS = 5L * 60L * 1000L // 5 minutes
 
     private val tierCacheLock = Any()
@@ -52,12 +54,16 @@ object CloudCodeQuotaService {
     private var cachedTierEmail: String? = null
     private var cachedTierValue: CodeAssistTier? = null
     private var cachedTierAtMs: Long = 0L
+    private var cachedProjectEmail: String? = null
+    private var cachedProjectId: String? = null
 
     fun invalidateTierCache() {
         synchronized(tierCacheLock) {
             cachedTierEmail = null
             cachedTierValue = null
             cachedTierAtMs = 0L
+            cachedProjectEmail = null
+            cachedProjectId = null
         }
     }
 
@@ -993,18 +999,23 @@ object CloudCodeQuotaService {
         return null
     }
 
-    private fun makePostRequest(urlStr: String, token: String): String? {
+    private fun makePostRequest(
+        urlStr: String,
+        token: String,
+        bodyJson: String = "{}",
+        timeoutMs: Int = 10000
+    ): String? {
         val url = URL(urlStr)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.doOutput = true
-        conn.connectTimeout = 10000
-        conn.readTimeout = 10000
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
         conn.setRequestProperty("Authorization", "Bearer $token")
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("User-Agent", "antigravity")
 
-        OutputStreamWriter(conn.outputStream).use { it.write("{}"); it.flush() }
+        OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(bodyJson); it.flush() }
 
         val code = conn.responseCode
         return if (code in 200..299) {
@@ -1012,6 +1023,119 @@ object CloudCodeQuotaService {
         } else {
             val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
             Log.w(TAG, "Request to $urlStr failed ($code): $err")
+            null
+        }
+    }
+
+    internal fun extractGenerateContentText(respStr: String): String? {
+        return try {
+            val root = JSONObject(respStr)
+            val payload = root.optJSONObject("response") ?: root
+            val candidates = payload.optJSONArray("candidates") ?: return null
+            if (candidates.length() == 0) return null
+            val parts = candidates.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+                ?: return null
+            val sb = StringBuilder()
+            for (i in 0 until parts.length()) {
+                val part = parts.optJSONObject(i) ?: continue
+                if (part.optBoolean("thought", false)) continue
+                val text = part.optString("text", "")
+                if (text.isNotEmpty()) sb.append(text)
+            }
+            sb.toString().trim().takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun resolveProjectId(email: String, token: String): String {
+        val normEmail = email.trim().lowercase()
+        if (normEmail.isNotEmpty()) {
+            synchronized(tierCacheLock) {
+                if (cachedProjectEmail == normEmail && !cachedProjectId.isNullOrBlank()) {
+                    return cachedProjectId!!
+                }
+            }
+        }
+        val metaBody = """{"metadata":{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}"""
+        for (baseUrl in CLOUDCODE_API_BASES) {
+            try {
+                val resp = makePostRequest("$baseUrl$TIER_PATH", token, metaBody, timeoutMs = 5000) ?: continue
+                val projectId = JSONObject(resp).optString("cloudaicompanionProject", "").trim()
+                if (projectId.isNotEmpty()) {
+                    if (normEmail.isNotEmpty()) {
+                        synchronized(tierCacheLock) {
+                            cachedProjectEmail = normEmail
+                            cachedProjectId = projectId
+                        }
+                    }
+                    return projectId
+                }
+            } catch (_: Exception) {}
+        }
+        return ""
+    }
+
+    suspend fun generateLightweightText(
+        context: Context,
+        systemInstruction: String,
+        userText: String,
+        maxOutputTokens: Int = 48
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            OAuthManager.refreshTokenIfNeeded(context)
+            val token = OAuthManager.getAccessToken(context) ?: return@withContext null
+            val email = OAuthManager.getUserEmail(context)?.trim().orEmpty()
+            val projectId = resolveProjectId(email, token)
+
+            val requestObj = JSONObject().apply {
+                if (systemInstruction.isNotBlank()) {
+                    put(
+                        "systemInstruction",
+                        JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
+                    )
+                }
+                put(
+                    "contents",
+                    JSONArray().put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("parts", JSONArray().put(JSONObject().put("text", userText)))
+                        }
+                    )
+                )
+                put(
+                    "generationConfig",
+                    JSONObject().apply {
+                        put("temperature", 0.2)
+                        put("maxOutputTokens", maxOutputTokens)
+                        put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                    }
+                )
+            }
+
+            for (baseUrl in CLOUDCODE_API_BASES) {
+                for (model in TITLE_LIGHTWEIGHT_MODELS) {
+                    try {
+                        val payload = JSONObject().apply {
+                            put("model", model)
+                            if (projectId.isNotBlank()) put("project", projectId)
+                            put("request", requestObj)
+                        }.toString()
+                        val resp = makePostRequest("$baseUrl$GENERATE_CONTENT_PATH", token, payload, timeoutMs = 10000)
+                            ?: continue
+                        val text = extractGenerateContentText(resp)
+                        if (!text.isNullOrBlank()) return@withContext text
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Lightweight generation failed ($model on $baseUrl): ${e.message}")
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "generateLightweightText error: ${e.message}")
             null
         }
     }
@@ -1243,8 +1367,15 @@ object CloudCodeQuotaService {
 
                 val resultTier = CodeAssistTier(currentTier = curTier, paidTier = paidTier)
                 val resolvedEmail = OAuthManager.getUserEmail(context)?.trim().orEmpty()
+                val resolvedProject = json.optString("cloudaicompanionProject", "").trim()
                 if (resolvedEmail.isNotEmpty()) {
                     putCachedTier(resolvedEmail, resultTier)
+                    if (resolvedProject.isNotEmpty()) {
+                        synchronized(tierCacheLock) {
+                            cachedProjectEmail = resolvedEmail.lowercase()
+                            cachedProjectId = resolvedProject
+                        }
+                    }
                     id.vern.antigravity.oauth.AccountManager.updateAccountTier(
                         context,
                         resolvedEmail,

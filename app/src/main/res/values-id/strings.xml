@@ -320,6 +320,8 @@
     <string name="dialog_rename_convo_title">Ubah Nama Percakapan</string>
     <string name="dialog_rename_convo_label">Judul</string>
     <string name="dialog_rename_convo_save">Simpan</string>
+    <string name="dialog_rename_convo_auto_ai">Judul AI</string>
+    <string name="toast_generating_title">Membuat judul AI…</string>
     <string name="dialog_delete_convo_title">Hapus Percakapan</string>
     <string name="dialog_delete_convo_msg">Apakah Anda yakin ingin menghapus percakapan ini? Semua pesan di obrolan ini akan dihapus.</string>
     <string name="dialog_delete_specific_convo_msg">Apakah Anda yakin ingin menghapus \"%1$s\"?</string>

@@ -35,6 +35,7 @@ object ConversationPersistence {
                 put("isPinned", item.isPinned)
                 if (item.projectPath != null) put("projectPath", item.projectPath)
                 if (!item.cliSessionId.isNullOrBlank()) put("cliSessionId", item.cliSessionId)
+                if (item.isCustomTitle) put("isCustomTitle", true)
             }
             jsonArray.put(obj)
         }
@@ -62,7 +63,8 @@ object ConversationPersistence {
                             messageCount = obj.optInt("messageCount", 0),
                             isPinned = obj.optBoolean("isPinned", false),
                             projectPath = if (obj.has("projectPath")) obj.getString("projectPath") else null,
-                            cliSessionId = obj.optString("cliSessionId", "").ifBlank { null }
+                            cliSessionId = obj.optString("cliSessionId", "").ifBlank { null },
+                            isCustomTitle = obj.optBoolean("isCustomTitle", false)
                         )
                     )
                 }

@@ -166,6 +166,7 @@ class ConversationManagerDelegate {
     fun renameConversation(
         newTitle: String,
         summaryId: String? = null,
+        isCustomTitle: Boolean? = null,
         context: Context? = null,
         currentMessageCount: Int = 0,
         currentWorkspacePath: String = "",
@@ -184,7 +185,11 @@ class ConversationManagerDelegate {
                 mutableConversationHistory.update { list ->
                     val exists = list.any { it.id == currentId }
                     if (exists) {
-                        list.map { if (it.id == currentId) it.copy(title = trimmed) else it }
+                        list.map {
+                            if (it.id == currentId) {
+                                it.copy(title = trimmed, isCustomTitle = isCustomTitle ?: it.isCustomTitle)
+                            } else it
+                        }
                     } else {
                         listOf(
                             ConversationSummary(
@@ -193,7 +198,8 @@ class ConversationManagerDelegate {
                                 timestamp = System.currentTimeMillis(),
                                 messageCount = currentMessageCount,
                                 isPinned = mutableIsConversationPinned.value,
-                                projectPath = currentWorkspacePath
+                                projectPath = currentWorkspacePath,
+                                isCustomTitle = isCustomTitle ?: false
                             )
                         ) + list
                     }
@@ -203,7 +209,11 @@ class ConversationManagerDelegate {
                 }
             } else {
                 mutableConversationHistory.update { list ->
-                    list.map { if (it.id == summaryId) it.copy(title = trimmed) else it }
+                    list.map {
+                        if (it.id == summaryId) {
+                            it.copy(title = trimmed, isCustomTitle = isCustomTitle ?: it.isCustomTitle)
+                        } else it
+                    }
                 }
                 if (mutableActiveConversationId.value == summaryId) {
                     mutableConversationTitle.value = trimmed
@@ -314,8 +324,9 @@ class ConversationManagerDelegate {
         if (currentMessages.isNotEmpty()) {
             val title = mutableConversationTitle.value
             val convId = currentId ?: UUID.randomUUID().toString()
-            val existingCliSessionId = mutableConversationHistory.value
-                .firstOrNull { it.id == convId }?.cliSessionId
+            val existingSummary = mutableConversationHistory.value.firstOrNull { it.id == convId }
+            val existingCliSessionId = existingSummary?.cliSessionId
+            val existingIsCustomTitle = existingSummary?.isCustomTitle ?: false
             val summary = ConversationSummary(
                 id = convId,
                 title = title,
@@ -323,7 +334,8 @@ class ConversationManagerDelegate {
                 messageCount = currentMessages.size,
                 isPinned = mutableIsConversationPinned.value,
                 projectPath = currentWorkspacePath,
-                cliSessionId = existingCliSessionId
+                cliSessionId = existingCliSessionId,
+                isCustomTitle = existingIsCustomTitle
             )
             mutableConversationHistory.update { list ->
                 listOf(summary) + list.filter { it.id != convId }

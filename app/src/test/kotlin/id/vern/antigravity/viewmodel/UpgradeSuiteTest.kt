@@ -3,6 +3,7 @@ package id.vern.antigravity.viewmodel
 import id.vern.antigravity.ui.components.MarkdownElement
 import id.vern.antigravity.ui.components.parseMarkdown
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,7 +20,8 @@ class UpgradeSuiteTest {
                 messageCount = 4,
                 isPinned = true,
                 projectPath = "/data/home/repos/Antigravity",
-                cliSessionId = "cli-uuid-999"
+                cliSessionId = "cli-uuid-999",
+                isCustomTitle = true
             ),
             ConversationSummary(
                 id = "conv-2",
@@ -28,7 +30,8 @@ class UpgradeSuiteTest {
                 messageCount = 1,
                 isPinned = false,
                 projectPath = null,
-                cliSessionId = null
+                cliSessionId = null,
+                isCustomTitle = false
             )
         )
 
@@ -37,7 +40,9 @@ class UpgradeSuiteTest {
         assertEquals(2, restored.size)
         assertEquals("cli-uuid-999", restored[0].cliSessionId)
         assertTrue(restored[0].isPinned)
+        assertTrue(restored[0].isCustomTitle)
         assertNull(restored[1].cliSessionId)
+        assertFalse(restored[1].isCustomTitle)
     }
 
     @Test

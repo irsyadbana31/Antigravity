@@ -320,6 +320,8 @@
     <string name="dialog_rename_convo_title">Rename Conversation</string>
     <string name="dialog_rename_convo_label">Title</string>
     <string name="dialog_rename_convo_save">Save</string>
+    <string name="dialog_rename_convo_auto_ai">Auto AI</string>
+    <string name="toast_generating_title">Generating AI title…</string>
     <string name="dialog_delete_convo_title">Delete Conversation</string>
     <string name="dialog_delete_convo_msg">Are you sure you want to delete this conversation? All messages in this chat will be removed.</string>
     <string name="dialog_delete_specific_convo_msg">Are you sure you want to delete \"%1$s\"?</string>

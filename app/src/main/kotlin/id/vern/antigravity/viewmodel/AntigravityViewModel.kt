@@ -117,7 +117,8 @@ data class ConversationSummary(
     val messageCount: Int,
     val isPinned: Boolean = false,
     val projectPath: String? = null,
-    val cliSessionId: String? = null
+    val cliSessionId: String? = null,
+    val isCustomTitle: Boolean = false
 )
 
 data class CustomizationItem(
@@ -318,6 +319,9 @@ class AntigravityViewModel : ViewModel() {
 
     private val mutableIsExecuting = MutableStateFlow(false)
     val isExecuting: StateFlow<Boolean> = mutableIsExecuting.asStateFlow()
+
+    private val mutableIsGeneratingTitle = MutableStateFlow(false)
+    val isGeneratingTitle: StateFlow<Boolean> = mutableIsGeneratingTitle.asStateFlow()
 
     private val mutableQueuedMessages = MutableStateFlow<List<QueuedMessage>>(emptyList())
     val queuedMessages: StateFlow<List<QueuedMessage>> = mutableQueuedMessages.asStateFlow()
@@ -885,11 +889,55 @@ class AntigravityViewModel : ViewModel() {
         conversationManagerDelegate.renameConversation(
             newTitle = newTitle,
             summaryId = summaryId,
+            isCustomTitle = true,
             context = context,
             currentMessageCount = mutableChatMessages.value.size,
             currentWorkspacePath = workspacePath.value,
             onLog = ::addLog
         )
+
+    fun regenerateTitleWithAi(context: Context, summaryId: String? = null) {
+        val targetId = summaryId ?: activeConversationId.value ?: return
+        if (mutableIsGeneratingTitle.value) return
+        val appContext = context.applicationContext
+        mutableIsGeneratingTitle.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val msgs = if (targetId == activeConversationId.value) {
+                    mutableChatMessages.value
+                } else {
+                    ConversationPersistence.loadMessagesForConversation(appContext, targetId)
+                }
+                val firstUser = msgs.firstOrNull { it.role == MessageRole.USER }?.content.orEmpty()
+                val firstAssistant = msgs.firstOrNull { it.role == MessageRole.ASSISTANT }?.content.orEmpty()
+                if (firstUser.isBlank() && firstAssistant.isBlank()) return@launch
+
+                val generated = ConversationTitleGenerator.generateContextualTitle(
+                    context = appContext,
+                    userPrompt = firstUser,
+                    assistantResponse = firstAssistant,
+                    availableModels = mutableCliModels.value,
+                    fallbackModelId = selectedModelCliId.value
+                )
+                if (generated != null) {
+                    conversationManagerDelegate.renameConversation(
+                        newTitle = generated,
+                        summaryId = targetId,
+                        isCustomTitle = false,
+                        context = appContext,
+                        onLog = ::addLog
+                    )
+                    addLog("Conversation", "AI title updated: $generated")
+                } else {
+                    addLog("Conversation", "AI title regeneration returned no candidate")
+                }
+            } catch (e: Exception) {
+                addLog("Conversation", "AI title regeneration failed: ${e.message}")
+            } finally {
+                mutableIsGeneratingTitle.value = false
+            }
+        }
+    }
     fun togglePinConversation(summaryId: String? = null, context: Context? = null): Boolean =
         conversationManagerDelegate.togglePinConversation(summaryId, context, ::addLog)
     fun deleteConversation(id: String) =
@@ -1599,6 +1647,10 @@ class AntigravityViewModel : ViewModel() {
             conversationManagerDelegate.setActiveConversationIdDirect(convId)
         }
 
+        val isShellCommand = content.startsWith("!") || content.startsWith("$ ")
+        val existingSummary = conversationHistory.value.firstOrNull { it.id == convId }
+        val isCustomTitle = existingSummary?.isCustomTitle == true
+
         var autoTitleSeed: String? = null
         if (conversationTitle.value == "New Conversation" || conversationTitle.value.isBlank()) {
             val titleCandidate = ConversationTitleGenerator.buildImmediateFallbackTitle(
@@ -1607,9 +1659,16 @@ class AntigravityViewModel : ViewModel() {
             )
             if (titleCandidate.isNotBlank() && titleCandidate != "New Conversation") {
                 conversationManagerDelegate.setConversationTitleDirect(titleCandidate)
-                if (isFirstMessage) {
+                if (isFirstMessage && !isCustomTitle) {
                     autoTitleSeed = titleCandidate
                 }
+            }
+        } else if (!isCustomTitle && !isShellCommand) {
+            val firstUserMsg = mutableChatMessages.value
+                .firstOrNull { it.role == MessageRole.USER }
+                ?.content ?: content
+            if (ConversationTitleGenerator.looksLikeLegacyFallbackTitle(conversationTitle.value, firstUserMsg)) {
+                autoTitleSeed = conversationTitle.value
             }
         }
 
@@ -1630,7 +1689,7 @@ class AntigravityViewModel : ViewModel() {
         mutableAttachedFiles.value = emptyList()
 
         val preservedCliSession = convIdToCliSessionId[convId]
-            ?: conversationHistory.value.firstOrNull { it.id == convId }?.cliSessionId
+            ?: existingSummary?.cliSessionId
         val currentSummary = ConversationSummary(
             id = convId,
             title = conversationTitle.value,
@@ -1638,7 +1697,8 @@ class AntigravityViewModel : ViewModel() {
             messageCount = updatedMessages.size,
             isPinned = isConversationPinned.value,
             projectPath = workspacePath.value,
-            cliSessionId = preservedCliSession
+            cliSessionId = preservedCliSession,
+            isCustomTitle = isCustomTitle
         )
         conversationManagerDelegate.updateConversationHistoryDirect { list ->
             listOf(currentSummary) + list.filter { it.id != convId }
@@ -1647,7 +1707,6 @@ class AntigravityViewModel : ViewModel() {
         saveMessagesForConversation(context, convId, updatedMessages)
         saveLastActiveConversationId(context, convId)
 
-        val isShellCommand = content.startsWith("!") || content.startsWith("$ ")
         addLog("Chat", "User prompt: ${effectiveContent.take(150)}")
         if (!isShellCommand && !OAuthManager.hasToken(context)) {
             authDelegate.showGoogleSignInDialog()
@@ -1666,6 +1725,21 @@ class AntigravityViewModel : ViewModel() {
             saveConversationHistory(context)
             saveMessagesForConversation(context, convId, finalMessages)
             return
+        }
+
+        if (autoTitleSeed != null &&
+            isFirstMessage &&
+            !isShellCommand &&
+            OAuthManager.hasToken(context) &&
+            ConversationTitleGenerator.isSubstantiveForEarlyTitle(effectiveContent)
+        ) {
+            launchContextualAutoTitle(
+                context = context.applicationContext,
+                convId = convId,
+                expectedCurrentTitle = autoTitleSeed,
+                userPrompt = effectiveContent,
+                assistantResponse = ""
+            )
         }
 
         executeAiTurn(context, effectiveContent, convId, currentAttachments, autoTitleSeed)
@@ -2591,11 +2665,16 @@ class AntigravityViewModel : ViewModel() {
                     }
 
                     if (autoTitleSeed != null && exitCode == 0 && !authRequired && finalContent.isNotBlank()) {
+                        val titleSourcePrompt = mutableChatMessages.value
+                            .firstOrNull { it.role == MessageRole.USER }
+                            ?.content
+                            ?.takeIf { it.isNotBlank() }
+                            ?: prompt
                         launchContextualAutoTitle(
                             context = context.applicationContext,
                             convId = convId,
                             expectedCurrentTitle = autoTitleSeed,
-                            userPrompt = prompt,
+                            userPrompt = titleSourcePrompt,
                             assistantResponse = finalContent
                         )
                     }
@@ -2658,28 +2737,36 @@ class AntigravityViewModel : ViewModel() {
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (mutableIsQuotaLoading.value) {
-                    delay(1200)
+                val preSummary = conversationHistory.value.firstOrNull { it.id == convId }
+                if (preSummary?.isCustomTitle == true || preSummary?.title != expectedCurrentTitle) {
+                    return@launch
                 }
+
                 val generated = ConversationTitleGenerator.generateContextualTitle(
                     context = context,
                     userPrompt = userPrompt,
                     assistantResponse = assistantResponse,
                     availableModels = mutableCliModels.value,
                     fallbackModelId = selectedModelCliId.value
-                ) ?: return@launch
+                )
+                if (generated == null) {
+                    addLog("Conversation", "Auto-title returned no candidate")
+                    return@launch
+                }
 
-                val currentStoredTitle = conversationHistory.value.firstOrNull { it.id == convId }?.title
-                if (currentStoredTitle != expectedCurrentTitle) {
+                val currentSummary = conversationHistory.value.firstOrNull { it.id == convId }
+                if (currentSummary?.isCustomTitle == true || currentSummary?.title != expectedCurrentTitle) {
                     return@launch
                 }
 
                 conversationManagerDelegate.renameConversation(
                     newTitle = generated,
                     summaryId = convId,
+                    isCustomTitle = false,
                     context = context,
                     onLog = ::addLog
                 )
+                addLog("Conversation", "Auto-title applied: $generated")
             } catch (e: Exception) {
                 addLog("Conversation", "Auto-title skipped: ${e.message}")
             }

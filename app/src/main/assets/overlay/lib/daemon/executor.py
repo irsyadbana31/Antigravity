@@ -165,13 +165,12 @@ def run_task_worker(task):
             cmd_args = [
                 agy_wrapper,
                 "--dangerously-skip-permissions",
-                "--print",
                 "--output-format",
                 "text",
             ]
             if convo_id:
                 cmd_args.extend(["--conversation", convo_id])
-            cmd_args.append(prompt)
+            cmd_args.extend(["--print", prompt])
             res = subprocess.run(
                 cmd_args,
                 shell=False,

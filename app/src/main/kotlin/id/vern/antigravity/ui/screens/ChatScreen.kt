@@ -95,6 +95,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -1729,6 +1730,18 @@ fun ChatScreen(
                     }
                 ) {
                     Text(stringResource(R.string.dialog_rename_convo_save))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = messages.isNotEmpty(),
+                    onClick = {
+                        viewModel.regenerateTitleWithAi(context)
+                        Toast.makeText(context, context.getString(R.string.toast_generating_title), Toast.LENGTH_SHORT).show()
+                        showRenameDialog = false
+                    }
+                ) {
+                    Text(stringResource(R.string.dialog_rename_convo_auto_ai))
                 }
             }
         )

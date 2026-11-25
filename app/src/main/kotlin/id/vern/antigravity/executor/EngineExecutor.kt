@@ -2,6 +2,7 @@ package id.vern.antigravity.executor
 
 import android.content.Context
 import android.system.Os
+import android.util.Log
 import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.LseCompatHelper
@@ -19,6 +20,7 @@ import org.json.JSONObject
 
 object EngineExecutor {
 
+    private const val TAG = "EngineExecutor"
     const val ACP_UNAVAILABLE = -42
 
     @Volatile
@@ -692,11 +694,32 @@ object EngineExecutor {
         } catch (e: Exception) {}
     }
 
+    internal fun buildQuickPrintArgs(
+        prompt: String,
+        cliModelId: String? = null,
+        timeoutMs: Long = 20_000L
+    ): List<String> {
+        val timeoutSec = ((timeoutMs / 1000L).coerceAtLeast(5L)).toString() + "s"
+        val args = mutableListOf(
+            "--output-format", "text",
+            "--disable-slash-commands",
+            "--effort", "low",
+            "--print-timeout", timeoutSec
+        )
+        if (!cliModelId.isNullOrBlank()) {
+            args.add("--model")
+            args.add(cliModelId)
+        }
+        args.add("-p")
+        args.add(prompt)
+        return args
+    }
+
     suspend fun runAgyQuickPrint(
         context: Context,
         prompt: String,
         cliModelId: String? = null,
-        timeoutMs: Long = 15_000L
+        timeoutMs: Long = 20_000L
     ): String? = withContext(Dispatchers.IO) {
         healEnvironment(context)
 
@@ -722,28 +745,18 @@ object EngineExecutor {
             libraryPaths = libraryPaths,
             glibcLibDir = libDir,
             targetBin = agyBin,
-            args = listOf(
-                "--print",
-                "--output-format", "text",
-                "--disable-slash-commands",
-                "--effort", "low"
-            )
+            args = buildQuickPrintArgs(prompt, cliModelId, timeoutMs)
         )
-        if (!cliModelId.isNullOrBlank()) {
-            cmdList.add("--model")
-            cmdList.add(cliModelId)
-        }
-        cmdList.add(prompt)
 
         val pb = ProcessBuilder(cmdList)
-        pb.directory(homeDir)
+        pb.directory(tmpDir)
 
         val env = pb.environment()
         env.remove("LD_PRELOAD")
         env["PREFIX"] = prefixDir.absolutePath
         env["HOME"] = homeDir.absolutePath
         env["TMPDIR"] = tmpDir.absolutePath
-        env["PWD"] = homeDir.absolutePath
+        env["PWD"] = tmpDir.absolutePath
         env["TERM"] = "dumb"
         env["LANG"] = "en_US.UTF-8"
         env["PATH"] = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}:/system/bin"
@@ -765,6 +778,7 @@ object EngineExecutor {
         }
 
         val outputSb = StringBuilder()
+        val stderrSb = StringBuilder()
         val stdoutThread = Thread {
             try {
                 BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8)).use { reader ->
@@ -778,7 +792,8 @@ object EngineExecutor {
         }
         val stderrThread = Thread {
             try {
-                process.errorStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val errText = process.errorStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                if (errText.isNotEmpty()) stderrSb.append(errText.take(1000))
             } catch (_: Exception) {}
         }
 
@@ -796,6 +811,7 @@ object EngineExecutor {
 
         if (!finished) {
             try { process.destroyForcibly() } catch (_: Exception) {}
+            Log.w(TAG, "runAgyQuickPrint timed out after ${timeoutMs}ms (model=$cliModelId)")
             return@withContext null
         }
 
@@ -803,7 +819,12 @@ object EngineExecutor {
         try { stderrThread.join(500) } catch (_: Exception) {}
 
         val result = outputSb.toString().trim()
-        if (process.exitValue() == 0 && result.isNotBlank()) result else null
+        if (process.exitValue() == 0 && result.isNotBlank()) {
+            result
+        } else {
+            Log.w(TAG, "runAgyQuickPrint exited ${process.exitValue()} (model=$cliModelId): ${stderrSb.toString().trim().take(300)}")
+            null
+        }
     }
 
     suspend fun runAgySlashCommandJson(
