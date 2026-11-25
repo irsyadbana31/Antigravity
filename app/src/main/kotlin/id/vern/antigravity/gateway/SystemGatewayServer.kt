@@ -65,8 +65,22 @@ class SystemGatewayServer(
                 .removePrefix("/")
         }
 
+        internal enum class ExecMode { SHELL, RISH }
+
         internal fun resolveExecCommand(json: JSONObject): String =
             json.optString("cmd", "").ifBlank { json.optString("command", "") }.trim()
+
+        internal fun resolveExecMode(json: JSONObject): ExecMode? {
+            val rawMode = json.optString("mode", "").trim()
+            if (rawMode.isNotEmpty()) {
+                return when (rawMode.lowercase()) {
+                    "shell" -> ExecMode.SHELL
+                    "rish" -> ExecMode.RISH
+                    else -> null
+                }
+            }
+            return if (json.optBoolean("rish", false)) ExecMode.RISH else ExecMode.SHELL
+        }
 
         internal fun buildExecEnvironment(
             filesPath: String,
@@ -353,12 +367,7 @@ class SystemGatewayServer(
 
         // Diagnostic GET/POST endpoints (/gateway/*)
         when (cleanPath) {
-            "/gateway/status" -> return JSONObject()
-                .put("ok", true)
-                .put("status", "online")
-                .put("port", boundPort)
-                .put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
-                .put("rish_available", RishHelper.isAvailable(context))
+            "/gateway/status" -> return handleStatus()
 
             "/gateway/logs" -> {
                 val tail = query["tail"]?.toIntOrNull() ?: 50
@@ -422,6 +431,7 @@ class SystemGatewayServer(
             "notify" -> handleNotify(json)
             "vibrate" -> handleVibrate(json)
             "exec" -> handleExec(json)
+            "status" -> handleStatus()
             "logs" -> JSONObject()
                 .put("ok", true)
                 .put("logs", AppLogger.getRecentJson(json.optInt("tail", 50)))
@@ -443,6 +453,13 @@ class SystemGatewayServer(
                 .put("unknown_command", command)
         }
     }
+
+    private fun handleStatus(): JSONObject = JSONObject()
+        .put("ok", true)
+        .put("status", "online")
+        .put("port", boundPort)
+        .put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
+        .put("rish_available", RishHelper.isAvailable(context))
 
     private fun handleToast(json: JSONObject): JSONObject {
         val msg = json.optString("message", json.optString("text", "Antigravity"))
@@ -597,7 +614,11 @@ class SystemGatewayServer(
         if (cmd.isEmpty()) {
             return JSONObject().put("ok", false).put("error", "empty command")
         }
-        val useRish = json.optBoolean("rish", false)
+        val execMode = resolveExecMode(json)
+            ?: return JSONObject()
+                .put("ok", false)
+                .put("error", "invalid mode: '${json.optString("mode")}' (supported: shell, rish)")
+        val useRish = execMode == ExecMode.RISH
         val timeoutMs = json.optLong("timeout_ms", 30_000L).coerceIn(1_000L, 120_000L)
         val source = json.optString("source", "agent")
         val homeDir = File(context.filesDir, "home").apply { mkdirs() }

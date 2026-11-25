@@ -3,6 +3,7 @@ package id.vern.antigravity.gateway
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,6 +13,8 @@ class SystemGatewayServerTest {
     fun normalizeCommandEndpoint_handlesDirectAndDualRoutes() {
         assertEquals("exec", SystemGatewayServer.normalizeCommandEndpoint("/exec"))
         assertEquals("exec", SystemGatewayServer.normalizeCommandEndpoint("/gateway/exec"))
+        assertEquals("status", SystemGatewayServer.normalizeCommandEndpoint("/status"))
+        assertEquals("status", SystemGatewayServer.normalizeCommandEndpoint("/gateway/status"))
         assertEquals("notify", SystemGatewayServer.normalizeCommandEndpoint("/gateway/notify/"))
         assertEquals("exec", SystemGatewayServer.normalizeCommandEndpoint("/gateway/exec?debug=1"))
         assertEquals("toast", SystemGatewayServer.normalizeCommandEndpoint("/toast/"))
@@ -27,6 +30,29 @@ class SystemGatewayServerTest {
             SystemGatewayServer.resolveExecCommand(JSONObject().put("cmd", "primary").put("command", "fallback"))
         )
         assertEquals("", SystemGatewayServer.resolveExecCommand(JSONObject()))
+    }
+
+    @Test
+    fun resolveExecMode_validatesExplicitModeAndFallsBackToRishFlag() {
+        assertEquals(
+            SystemGatewayServer.ExecMode.SHELL,
+            SystemGatewayServer.resolveExecMode(JSONObject())
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.SHELL,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "shell"))
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.RISH,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "RISH"))
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.RISH,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("rish", true))
+        )
+        assertNull(
+            SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "invalid_mode"))
+        )
     }
 
     @Test
