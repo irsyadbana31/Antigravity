@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import id.vern.antigravity.R
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 
 @Composable
@@ -170,7 +169,8 @@ fun GoogleSignInDialog(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = AntigravityBlue
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         )
                     ) {
                         Icon(
@@ -190,14 +190,14 @@ fun GoogleSignInDialog(
                         ) {
                             CircularProgressIndicator(
                                 strokeWidth = 2.dp,
-                                color = AntigravityBlue,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = stringResource(R.string.google_signin_waiting),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }

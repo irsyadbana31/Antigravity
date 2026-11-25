@@ -60,7 +60,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
@@ -108,8 +107,6 @@ import id.vern.antigravity.data.QueuedMessage
 import id.vern.antigravity.data.RunningTask
 import id.vern.antigravity.data.RunningSubagent
 import id.vern.antigravity.data.SlashAction
-import id.vern.antigravity.ui.theme.AntigravityBlue
-import id.vern.antigravity.ui.theme.AntigravityRed
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -323,13 +320,12 @@ fun ChatInputBar(
 
             if (allMentions.isNotEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
-                    tonalElevation = 4.dp
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
                 ) {
                     Column(modifier = Modifier.padding(vertical = 6.dp)) {
                         Text(
@@ -392,13 +388,12 @@ fun ChatInputBar(
             val matchingActions = slashActions.filter { it.cmd.contains(slashQuery, ignoreCase = true) }
             if (slashActions.isEmpty() || matchingActions.isNotEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
-                    tonalElevation = 4.dp
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
                 ) {
                     Column(modifier = Modifier.padding(vertical = 6.dp)) {
                         if (slashActions.isEmpty()) {
@@ -428,13 +423,12 @@ fun ChatInputBar(
 
         AnimatedVisibility(visible = queuedMessages.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
-                tonalElevation = 2.dp
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
 
@@ -442,7 +436,7 @@ fun ChatInputBar(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                            .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
                             .clickable { isQueuedExpanded = !isQueuedExpanded }
                             .padding(horizontal = 14.dp, vertical = 9.dp)
                     ) {
@@ -458,7 +452,11 @@ fun ChatInputBar(
                         ) {
                             Text(
                                 text = "${queuedMessages.size}",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFeatureSettings = "tnum"
+                                ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             )
@@ -554,13 +552,12 @@ fun ChatInputBar(
 
         AnimatedVisibility(visible = runningSubagents.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
-                tonalElevation = 2.dp
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val subagentCount = runningSubagents.size
@@ -574,7 +571,7 @@ fun ChatInputBar(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable { isSubagentRunningExpanded = !isSubagentRunningExpanded }
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
@@ -610,7 +607,7 @@ fun ChatInputBar(
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(13.dp),
                                         strokeWidth = 2.dp,
-                                        color = AntigravityBlue
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
@@ -624,12 +621,12 @@ fun ChatInputBar(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     IconButton(
                                         onClick = { onStopSubagent(subagent.id) },
-                                        modifier = Modifier.size(28.dp)
+                                        modifier = Modifier.size(30.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Stop,
                                             contentDescription = stringResource(R.string.chat_subagent_stop),
-                                            tint = AntigravityRed,
+                                            tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -643,13 +640,12 @@ fun ChatInputBar(
 
         AnimatedVisibility(visible = runningTasks.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
-                tonalElevation = 2.dp
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val taskCount = runningTasks.size
@@ -663,7 +659,7 @@ fun ChatInputBar(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable { isTaskRunningExpanded = !isTaskRunningExpanded }
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
@@ -699,7 +695,7 @@ fun ChatInputBar(
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(13.dp),
                                         strokeWidth = 2.dp,
-                                        color = AntigravityBlue
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
@@ -714,12 +710,12 @@ fun ChatInputBar(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     IconButton(
                                         onClick = { onStopTask(task.id) },
-                                        modifier = Modifier.size(28.dp)
+                                        modifier = Modifier.size(30.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Stop,
                                             contentDescription = stringResource(R.string.chat_task_stop),
-                                            tint = AntigravityRed,
+                                            tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -912,7 +908,7 @@ fun ChatInputBar(
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Normal
                         ),
-                        cursorBrush = SolidColor(AntigravityBlue),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         singleLine = false,
                         maxLines = 5,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
@@ -941,7 +937,7 @@ fun ChatInputBar(
                     val canAddMoreAttachments = attachedFiles.size < 5
                     Box(
                         modifier = Modifier
-                            .requiredSize(32.dp)
+                            .requiredSize(36.dp)
                             .clip(CircleShape)
                             .clickable(enabled = canAddMoreAttachments) { onAttachFileClick() },
                         contentAlignment = Alignment.Center
@@ -963,16 +959,18 @@ fun ChatInputBar(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
                         modifier = Modifier
                             .widthIn(max = 135.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .heightIn(min = 30.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable { onModelSelectorClick() }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = pillText,
@@ -999,16 +997,18 @@ fun ChatInputBar(
 
                     Box {
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
                             modifier = Modifier
                                 .widthIn(max = 105.dp)
-                                .clip(RoundedCornerShape(14.dp))
+                                .heightIn(min = 30.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { showSecurityMenu = !showSecurityMenu }
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
                                 Icon(
                                     imageVector = currentPresetIcon,
@@ -1093,29 +1093,18 @@ fun ChatInputBar(
                                                 if (item.isDefault) {
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Surface(
-                                                        shape = RoundedCornerShape(8.dp),
+                                                        shape = RoundedCornerShape(6.dp),
                                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
                                                     ) {
-                                                        Row(
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                                                        ) {
-                                                            Text(
-                                                                text = stringResource(R.string.security_preset_badge_default),
-                                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                                    fontSize = 9.5.sp,
-                                                                    fontWeight = FontWeight.Normal
-                                                                ),
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                            Spacer(modifier = Modifier.width(2.dp))
-                                                            Icon(
-                                                                imageVector = Icons.Default.Info,
-                                                                contentDescription = null,
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                modifier = Modifier.size(10.dp)
-                                                            )
-                                                        }
+                                                        Text(
+                                                            text = stringResource(R.string.security_preset_badge_default),
+                                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                                fontSize = 9.5.sp,
+                                                                fontWeight = FontWeight.Medium
+                                                            ),
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.5.dp)
+                                                        )
                                                     }
                                                 }
                                             }
@@ -1145,7 +1134,7 @@ fun ChatInputBar(
                     Spacer(modifier = Modifier.width(4.dp))
                     Box(
                         modifier = Modifier
-                            .requiredSize(32.dp)
+                            .requiredSize(36.dp)
                             .clip(CircleShape)
                             .clickable {
                                 if (onVoiceInputClick != null) {
@@ -1179,16 +1168,16 @@ fun ChatInputBar(
 
                         Box(
                             modifier = Modifier
-                                .requiredSize(32.dp)
+                                .requiredSize(36.dp)
                                 .clip(CircleShape)
-                                .background(AntigravityRed.copy(alpha = 0.2f))
+                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.16f))
                                 .clickable { onStopExecution() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Stop,
                                 contentDescription = stringResource(R.string.chat_btn_stop),
-                                tint = AntigravityRed,
+                                tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1197,10 +1186,10 @@ fun ChatInputBar(
                         val canSend = hasInput
                         Box(
                             modifier = Modifier
-                                .requiredSize(32.dp)
+                                .requiredSize(36.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (canSend) AntigravityBlue
+                                    if (canSend) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.surfaceVariant
                                 )
                                 .clickable(enabled = canSend) {
@@ -1213,7 +1202,7 @@ fun ChatInputBar(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = stringResource(R.string.chat_btn_send),
-                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }

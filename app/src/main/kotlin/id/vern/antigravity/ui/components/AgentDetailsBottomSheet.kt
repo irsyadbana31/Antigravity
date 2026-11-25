@@ -105,7 +105,6 @@ import id.vern.antigravity.R
 import id.vern.antigravity.data.ChangedFileItem
 import id.vern.antigravity.data.OpenTab
 import id.vern.antigravity.data.ArtifactFileItem
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.executor.EngineExecutor
@@ -295,8 +294,9 @@ fun AgentDetailsBottomSheet(
             ) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.height(38.dp)
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                    modifier = Modifier.height(42.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -395,14 +395,14 @@ fun AgentDetailsBottomSheet(
                                             CircularProgressIndicator(
                                                 modifier = Modifier.size(13.dp),
                                                 strokeWidth = 2.dp,
-                                                color = AntigravityBlue
+                                                color = MaterialTheme.colorScheme.primary
                                             )
                                         } else {
                                             Icon(
                                                 imageVector = Icons.Default.SmartToy,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(16.dp),
-                                                tint = AntigravityBlue
+                                                tint = MaterialTheme.colorScheme.primary
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
@@ -417,7 +417,7 @@ fun AgentDetailsBottomSheet(
                                             Text(
                                                 text = if (sub.isRunning) stringResource(R.string.subagent_chat_running) else stringResource(R.string.subagent_chat_completed),
                                                 fontSize = 10.5.sp,
-                                                color = if (sub.isRunning) AntigravityBlue else AntigravityGreen
+                                                color = if (sub.isRunning) MaterialTheme.colorScheme.primary else AntigravityGreen
                                             )
                                         }
                                     }
@@ -452,14 +452,14 @@ fun AgentDetailsBottomSheet(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(13.dp),
                                             strokeWidth = 2.dp,
-                                            color = AntigravityBlue
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Icon(
                                             imageVector = Icons.Default.Terminal,
                                             contentDescription = null,
                                             modifier = Modifier.size(16.dp),
-                                            tint = AntigravityBlue
+                                            tint = MaterialTheme.colorScheme.primary
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column(modifier = Modifier.weight(1f)) {
@@ -592,7 +592,7 @@ fun AgentDetailsBottomSheet(
                                         Icon(
                                             imageVector = Icons.Default.Description,
                                             contentDescription = null,
-                                            tint = AntigravityBlue,
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
@@ -728,7 +728,7 @@ fun AgentDetailsBottomSheet(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(14.dp),
                                             strokeWidth = 1.8.dp,
-                                            color = AntigravityBlue
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column(modifier = Modifier.weight(1f)) {
@@ -924,7 +924,7 @@ fun AgentDetailsBottomSheet(
                                     Icon(
                                         Icons.Default.Search,
                                         contentDescription = stringResource(R.string.chat_search),
-                                        tint = if (isReviewSearching) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (isReviewSearching) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -937,7 +937,7 @@ fun AgentDetailsBottomSheet(
                                         Icon(
                                             Icons.AutoMirrored.Filled.List,
                                             contentDescription = stringResource(R.string.common_filter),
-                                            tint = if (reviewFilterType != "All") AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = if (reviewFilterType != "All") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -1122,12 +1122,13 @@ fun AgentDetailsBottomSheet(
                                                         }
                                                     } else {
                                                         val content = fileDiffCache[fullRelPath] ?: ""
+                                                        val hunkColor = MaterialTheme.colorScheme.primary
                                                         Column(modifier = Modifier.padding(10.dp)) {
                                                             content.lines().take(60).forEach { line ->
                                                                 val color = when {
                                                                     line.startsWith("+") && !line.startsWith("+++") -> AntigravityGreen
                                                                     line.startsWith("-") && !line.startsWith("---") -> AntigravityRed
-                                                                    line.startsWith("@@") -> AntigravityBlue
+                                                                    line.startsWith("@@") -> hunkColor
                                                                     else -> Color(0xFF8B949E)
                                                                 }
                                                                 Text(
@@ -1445,10 +1446,10 @@ fun TabPillButton(
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(7.dp),
+        shape = RoundedCornerShape(8.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         modifier = Modifier
-            .size(32.dp)
+            .size(36.dp)
             .clickable(onClick = onClick)
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -1493,7 +1494,10 @@ fun AccordionHeader(
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = count.toString(),
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 12.sp,
+                    fontFeatureSettings = "tnum"
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

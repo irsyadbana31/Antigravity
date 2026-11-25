@@ -14,8 +14,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -64,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
 import id.vern.antigravity.nativebridge.RustTurboBridge
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.util.ExternalFileOpener
 
 sealed class MarkdownElement {
@@ -365,7 +366,7 @@ private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
 
 fun parseInlineMarkdown(
     text: String,
-    primaryColor: Color = AntigravityBlue,
+    primaryColor: Color = Color(0xFF1D64E6),
     codeBgColor: Color = Color(0x2B888888),
     codeTextColor: Color = Color.Unspecified
 ): AnnotatedString {
@@ -484,6 +485,9 @@ fun MarkdownText(
     selectable: Boolean = true
 ) {
     val context = LocalContext.current
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val codeBgColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
+    val codeTextColor = MaterialTheme.colorScheme.onSurface
     val elements = remember(markdown) { parseMarkdown(markdown) }
 
     val markdownBody = @Composable {
@@ -498,7 +502,9 @@ fun MarkdownText(
                                 3 -> 13.sp to FontWeight.SemiBold
                                 else -> 12.sp to FontWeight.SemiBold
                             }
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text, primaryColor, codeBgColor, codeTextColor) {
+                                parseInlineMarkdown(element.text, primaryColor, codeBgColor, codeTextColor)
+                            }
                             FormattedText(
                                 annotatedString = annotated,
                                 style = MaterialTheme.typography.titleMedium.copy(
@@ -524,7 +530,9 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.ListItem -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text, primaryColor, codeBgColor, codeTextColor) {
+                                parseInlineMarkdown(element.text, primaryColor, codeBgColor, codeTextColor)
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -535,7 +543,7 @@ fun MarkdownText(
                                     text = element.bullet,
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontWeight = FontWeight.Bold,
-                                        color = AntigravityBlue
+                                        color = primaryColor
                                     ),
                                     modifier = Modifier.width(20.dp)
                                 )
@@ -552,7 +560,9 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.TaskItem -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text, primaryColor, codeBgColor, codeTextColor) {
+                                parseInlineMarkdown(element.text, primaryColor, codeBgColor, codeTextColor)
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -562,7 +572,7 @@ fun MarkdownText(
                                 Icon(
                                     imageVector = if (element.checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
                                     contentDescription = null,
-                                    tint = if (element.checked) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    tint = if (element.checked) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     modifier = Modifier
                                         .padding(top = 1.5.dp)
                                         .size(15.dp)
@@ -590,17 +600,20 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.BlockQuote -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text, primaryColor, codeBgColor, codeTextColor) {
+                                parseInlineMarkdown(element.text, primaryColor, codeBgColor, codeTextColor)
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
+                                    .height(IntrinsicSize.Min)
+                                    .padding(vertical = 3.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .width(3.dp)
-                                        .height(20.dp)
-                                        .background(AntigravityBlue, RoundedCornerShape(2.dp))
+                                        .width(2.5.dp)
+                                        .fillMaxHeight()
+                                        .background(primaryColor, RoundedCornerShape(2.dp))
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 FormattedText(
@@ -623,7 +636,9 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.Paragraph -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text, primaryColor, codeBgColor, codeTextColor) {
+                                parseInlineMarkdown(element.text, primaryColor, codeBgColor, codeTextColor)
+                            }
                             FormattedText(
                                 annotatedString = annotated,
                                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -665,6 +680,9 @@ fun MarkdownTableCard(
     fontSize: TextUnit,
     lineHeight: TextUnit
 ) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val codeBgColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
+    val codeTextColor = MaterialTheme.colorScheme.onSurface
     val colCount = table.headers.size.coerceAtLeast(1)
     val colWidths: List<Dp> = remember(table) {
         (0 until colCount).map { colIdx ->
@@ -679,19 +697,21 @@ fun MarkdownTableCard(
 
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
         Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
             Row(
-                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
             ) {
                 for (c in 0 until colCount) {
                     val headerText = table.headers.getOrElse(c) { "" }
-                    val annotated = remember(headerText) { parseInlineMarkdown(headerText) }
+                    val annotated = remember(headerText, primaryColor, codeBgColor, codeTextColor) {
+                        parseInlineMarkdown(headerText, primaryColor, codeBgColor, codeTextColor)
+                    }
                     val align = alignmentToTextAlign(table.alignments.getOrElse(c) { 'L' })
                     Box(
                         modifier = Modifier
@@ -705,7 +725,8 @@ fun MarkdownTableCard(
                                 lineHeight = lineHeight,
                                 fontWeight = FontWeight.Bold,
                                 color = textColor,
-                                textAlign = align
+                                textAlign = align,
+                                fontFeatureSettings = "tnum"
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -716,14 +737,16 @@ fun MarkdownTableCard(
             table.rows.forEachIndexed { rIdx, row ->
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                 val rowBg = if (rIdx % 2 == 1) {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.45f)
                 } else {
                     Color.Transparent
                 }
                 Row(modifier = Modifier.background(rowBg)) {
                     for (c in 0 until colCount) {
                         val cellText = row.getOrElse(c) { "" }
-                        val annotated = remember(cellText) { parseInlineMarkdown(cellText) }
+                        val annotated = remember(cellText, primaryColor, codeBgColor, codeTextColor) {
+                            parseInlineMarkdown(cellText, primaryColor, codeBgColor, codeTextColor)
+                        }
                         val align = alignmentToTextAlign(table.alignments.getOrElse(c) { 'L' })
                         Box(
                             modifier = Modifier
@@ -736,7 +759,8 @@ fun MarkdownTableCard(
                                     fontSize = fontSize,
                                     lineHeight = lineHeight,
                                     color = textColor,
-                                    textAlign = align
+                                    textAlign = align,
+                                    fontFeatureSettings = "tnum"
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -847,8 +871,8 @@ fun CodeBlockCard(
 
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
@@ -857,7 +881,7 @@ fun CodeBlockCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -933,14 +957,14 @@ fun CodeBlockCard(
 
             if (isCollapsible && !isExpanded) {
                 Text(
-                    text = "... (${lines.size - 24} more lines — tap to expand)",
+                    text = "... (${lines.size - 24} more lines · tap to expand)",
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = AntigravityBlue,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { isExpanded = true }
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f))
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }

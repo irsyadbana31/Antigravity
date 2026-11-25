@@ -31,12 +31,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -129,7 +131,6 @@ import id.vern.antigravity.ui.components.ChatBubble
 import id.vern.antigravity.ui.components.ChatInputBar
 import id.vern.antigravity.ui.components.GoogleSignInDialog
 import id.vern.antigravity.ui.components.ModelSelectorDialog
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.viewmodel.AntigravityViewModel
@@ -152,6 +153,7 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val activeConversationId by viewModel.activeConversationId.collectAsStateWithLifecycle()
     val conversationTitle by viewModel.conversationTitle.collectAsStateWithLifecycle()
     val conversationHistory by viewModel.conversationHistory.collectAsStateWithLifecycle()
     val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
@@ -484,11 +486,12 @@ fun ChatScreen(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable {
                                 viewModel.startNewConversation(context)
                                 scope.launch { drawerState.close() }
@@ -501,7 +504,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = stringResource(R.string.chat_new_conversation),
-                                tint = MaterialTheme.colorScheme.onSurface,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -604,12 +607,15 @@ fun ChatScreen(
                                         )
                                     } else {
                                         pinnedConversations.forEach { convo ->
+                                            val isActiveConvo = convo.id == activeConversationId
                                             Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = Color.Transparent,
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (isActiveConvo) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                                border = if (isActiveConvo) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)) else null,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .padding(vertical = 1.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
                                                     .clickable {
                                                         viewModel.loadConversation(context, convo)
                                                         scope.launch { drawerState.close() }
@@ -618,11 +624,21 @@ fun ChatScreen(
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)
                                                 ) {
+                                                    if (isActiveConvo) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .width(2.5.dp)
+                                                                .height(14.dp)
+                                                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                    }
                                                     Text(
                                                         text = convo.title,
                                                         style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = if (isActiveConvo) FontWeight.SemiBold else FontWeight.Normal,
                                                         color = MaterialTheme.colorScheme.onSurface,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis,
@@ -631,7 +647,7 @@ fun ChatScreen(
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text(
                                                         text = formatRelativeTime(convo.timestamp),
-                                                        style = MaterialTheme.typography.bodySmall,
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                                         fontSize = 12.sp
                                                     )
@@ -640,7 +656,7 @@ fun ChatScreen(
                                                     Box {
                                                         IconButton(
                                                             onClick = { showConvoMenu = true },
-                                                            modifier = Modifier.size(24.dp)
+                                                            modifier = Modifier.size(32.dp)
                                                         ) {
                                                             Icon(
                                                                 imageVector = Icons.Default.MoreVert,
@@ -813,11 +829,12 @@ fun ChatScreen(
 
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isCurrent) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                            border = if (isCurrent) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)) else null,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(RoundedCornerShape(10.dp))
                                                 .clickable {
                                                     viewModel.setWorkspacePath(context, projectDir.absolutePath)
                                                     scope.launch { drawerState.close() }
@@ -826,7 +843,7 @@ fun ChatScreen(
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
@@ -856,7 +873,7 @@ fun ChatScreen(
                                                             viewModel.startNewConversation(context, projectDir.absolutePath)
                                                             scope.launch { drawerState.close() }
                                                         },
-                                                        modifier = Modifier.size(24.dp)
+                                                        modifier = Modifier.size(32.dp)
                                                     ) {
                                                         Icon(
                                                             imageVector = Icons.Default.Add,
@@ -870,7 +887,7 @@ fun ChatScreen(
                                                     Box {
                                                         IconButton(
                                                             onClick = { showProjectMenu = true },
-                                                            modifier = Modifier.size(24.dp)
+                                                            modifier = Modifier.size(32.dp)
                                                         ) {
                                                             Icon(
                                                                 imageVector = Icons.Default.MoreVert,
@@ -923,12 +940,15 @@ fun ChatScreen(
                                             )
                                         } else {
                                             convoListForProject.forEach { c ->
+                                                val isActiveConvo = c.id == activeConversationId
                                                 Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = Color.Transparent,
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = if (isActiveConvo) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                                    border = if (isActiveConvo) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)) else null,
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .padding(vertical = 1.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
                                                         .clickable {
                                                             viewModel.loadConversation(context, c)
                                                             scope.launch { drawerState.close() }
@@ -937,11 +957,21 @@ fun ChatScreen(
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         horizontalArrangement = Arrangement.SpaceBetween,
-                                                        modifier = Modifier.padding(start = 32.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
+                                                        modifier = Modifier.padding(start = 28.dp, end = 4.dp, top = 5.dp, bottom = 5.dp)
                                                     ) {
+                                                        if (isActiveConvo) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .width(2.5.dp)
+                                                                    .height(12.dp)
+                                                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                                                            )
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                        }
                                                         Text(
                                                             text = c.title,
                                                             style = MaterialTheme.typography.bodySmall,
+                                                            fontWeight = if (isActiveConvo) FontWeight.SemiBold else FontWeight.Normal,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
                                                             modifier = Modifier.weight(1f)
@@ -949,7 +979,7 @@ fun ChatScreen(
                                                         Spacer(modifier = Modifier.width(6.dp))
                                                         Text(
                                                             text = formatRelativeTime(c.timestamp),
-                                                            style = MaterialTheme.typography.labelSmall,
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                                         )
                                                         Spacer(modifier = Modifier.width(2.dp))
@@ -957,7 +987,7 @@ fun ChatScreen(
                                                         Box {
                                                             IconButton(
                                                                 onClick = { showProjectConvoMenu = true },
-                                                                modifier = Modifier.size(20.dp)
+                                                                modifier = Modifier.size(32.dp)
                                                             ) {
                                                                 Icon(
                                                                     imageVector = Icons.Default.MoreVert,
@@ -1050,12 +1080,15 @@ fun ChatScreen(
                                         )
                                     } else {
                                         unpinnedConversations.forEach { convo ->
+                                            val isActiveConvo = convo.id == activeConversationId
                                             Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = Color.Transparent,
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (isActiveConvo) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                                border = if (isActiveConvo) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)) else null,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .padding(vertical = 1.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
                                                     .clickable {
                                                         viewModel.loadConversation(context, convo)
                                                         scope.launch { drawerState.close() }
@@ -1064,11 +1097,21 @@ fun ChatScreen(
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)
                                                 ) {
+                                                    if (isActiveConvo) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .width(2.5.dp)
+                                                                .height(14.dp)
+                                                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                    }
                                                     Text(
                                                         text = convo.title,
                                                         style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = if (isActiveConvo) FontWeight.SemiBold else FontWeight.Normal,
                                                         color = MaterialTheme.colorScheme.onSurface,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis,
@@ -1077,7 +1120,7 @@ fun ChatScreen(
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text(
                                                         text = formatRelativeTime(convo.timestamp),
-                                                        style = MaterialTheme.typography.bodySmall,
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                                         fontSize = 12.sp
                                                     )
@@ -1086,7 +1129,7 @@ fun ChatScreen(
                                                     Box {
                                                         IconButton(
                                                             onClick = { showUnpinnedMenu = true },
-                                                            modifier = Modifier.size(24.dp)
+                                                            modifier = Modifier.size(32.dp)
                                                         ) {
                                                             Icon(
                                                                 imageVector = Icons.Default.MoreVert,
@@ -1246,19 +1289,42 @@ fun ChatScreen(
             }
         }
     ) {
+        val isChatScrolled by remember {
+            derivedStateOf {
+                listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8
+            }
+        }
+        val topBarDividerAlpha by animateFloatAsState(
+            targetValue = if (isChatScrolled && messages.isNotEmpty()) 0.7f else 0f,
+            animationSpec = tween(durationMillis = 180),
+            label = "topBarDivider"
+        )
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = if (conversationTitle.isNotBlank() && conversationTitle != "New Conversation" && conversationTitle != "Antigravity -Android") conversationTitle else stringResource(R.string.chat_new_conversation),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(
+                                    text = if (conversationTitle.isNotBlank() && conversationTitle != "New Conversation" && conversationTitle != "Antigravity -Android") conversationTitle else stringResource(R.string.chat_new_conversation),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val wsName = currentWorkspace?.takeIf { it.isNotBlank() }?.let { File(it).name }
+                                if (!wsName.isNullOrBlank()) {
+                                    Text(
+                                        text = wsName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background,
                         scrolledContainerColor = MaterialTheme.colorScheme.background,
@@ -1292,7 +1358,10 @@ fun ChatScreen(
                             Button(
                                 onClick = { showCoreUpdateConfirmDialog = true },
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 modifier = Modifier
                                     .height(28.dp)
@@ -1301,15 +1370,13 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.SystemUpdate,
                                     contentDescription = null,
-                                    modifier = Modifier.size(13.dp),
-                                    tint = Color.White
+                                    modifier = Modifier.size(13.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = stringResource(R.string.topbar_core_update_btn),
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -1427,6 +1494,11 @@ fun ChatScreen(
                         }
                     }
                 )
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = topBarDividerAlpha)
+                    )
+                }
             },
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             modifier = modifier.fillMaxSize()
@@ -1462,11 +1534,20 @@ fun ChatScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.ic_launcher_logo),
-                                        contentDescription = stringResource(id = R.string.app_name),
-                                        modifier = Modifier.size(64.dp)
-                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                                        modifier = Modifier.size(56.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.ic_launcher_logo),
+                                                contentDescription = stringResource(id = R.string.app_name),
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                        }
+                                    }
 
                                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -1477,50 +1558,132 @@ fun ChatScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
 
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
 
                                     Text(
                                         text = stringResource(R.string.chat_empty_subheadline),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 24.dp)
+                                        modifier = Modifier.widthIn(max = 320.dp)
                                     )
 
-                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Spacer(modifier = Modifier.height(18.dp))
+
+                                    val workspaceDisplayName = currentWorkspace?.takeIf { it.isNotBlank() }?.let { File(it).name }
+                                        ?: stringResource(R.string.chat_workspace_default)
+                                    val modelDisplayName = selectedModel.ifBlank { stringResource(R.string.chat_model_select) }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.height(IntrinsicSize.Min)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .clickable { scope.launch { drawerState.open() } }
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Folder,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = workspaceDisplayName,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.widthIn(max = 130.dp)
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(1.dp)
+                                                    .fillMaxHeight()
+                                                    .padding(vertical = 6.dp)
+                                                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .clickable { viewModel.showModelSelector() }
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = modelDisplayName,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.widthIn(max = 140.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
 
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Surface(
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(16.dp))
+                                                .heightIn(min = 34.dp)
+                                                .clip(RoundedCornerShape(10.dp))
                                                 .clickable { showSkillsDialog = true }
                                         ) {
-                                            Text(
-                                                text = stringResource(R.string.chat_empty_install_skills),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                            )
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.chat_empty_install_skills),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
 
                                         Surface(
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(16.dp))
+                                                .heightIn(min = 34.dp)
+                                                .clip(RoundedCornerShape(10.dp))
                                                 .clickable { showPluginsDialog = true }
                                         ) {
-                                            Text(
-                                                text = stringResource(R.string.chat_empty_install_plugins),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                            )
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.chat_empty_install_plugins),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1764,9 +1927,17 @@ fun ChatScreen(
                         showDeleteConversationDialog = false
                         Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) {
                     Text(stringResource(R.string.dialog_delete_btn))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConversationDialog = false }) {
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -1795,9 +1966,20 @@ fun ChatScreen(
                         conversationToDelete = null
                         Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) {
                     Text(stringResource(R.string.dialog_delete_btn))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDeleteSpecificConversationDialog = false
+                    conversationToDelete = null
+                }) {
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -1826,9 +2008,20 @@ fun ChatScreen(
                         projectToDelete = null
                         Toast.makeText(context, context.getString(R.string.toast_project_removed), Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) {
                     Text(stringResource(R.string.dialog_delete_btn))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDeleteProjectDialog = false
+                    projectToDelete = null
+                }) {
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -1857,9 +2050,17 @@ fun ChatScreen(
                         showCoreUpdateConfirmDialog = false
                         viewModel.applyCoreEngineUpdate(context)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
                     Text(stringResource(R.string.core_update_btn_update))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCoreUpdateConfirmDialog = false }) {
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )

@@ -91,7 +91,6 @@ import org.json.JSONObject
 import id.vern.antigravity.R
 import id.vern.antigravity.data.OpenTab
 import id.vern.antigravity.ui.theme.AntigravityAmber
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import java.io.File
 
 private class PreviewWebView @JvmOverloads constructor(
@@ -238,8 +237,8 @@ fun CodeEditor(
                             onClick = { isPreviewMode = !isPreviewMode },
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isPreviewMode) AntigravityBlue else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = if (isPreviewMode) Color.White else MaterialTheme.colorScheme.onSurface
+                                containerColor = if (isPreviewMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isPreviewMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                             ),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.height(28.dp)
@@ -267,7 +266,7 @@ fun CodeEditor(
                                 imageVector = Icons.Default.Difference,
                                 contentDescription = stringResource(R.string.editor_btn_diff),
                                 modifier = Modifier.size(18.dp),
-                                tint = AntigravityBlue
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -628,7 +627,7 @@ fun CodeEditor(
                                 lineHeight = 18.sp
                             ),
                             visualTransformation = SyntaxHighlighterTransformation(tab.file.extension),
-                            cursorBrush = SolidColor(AntigravityBlue),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

@@ -145,7 +145,7 @@ enum class ThemeMode {
 
 enum class AccentColor(@StringRes val titleRes: Int, val colorHex: Long) {
     DEFAULT(R.string.accent_default, 0xFF0B57D0),
-    BLUE(R.string.accent_blue, 0xFF2979FF),
+    BLUE(R.string.accent_blue, 0xFF1D64E6),
     RED(R.string.accent_red, 0xFFE53935),
     YELLOW(R.string.accent_yellow, 0xFFF59E0B),
     GREEN(R.string.accent_green, 0xFF10B981),
@@ -198,8 +198,8 @@ enum class ThemePreset(
     val fgHex: String,
     val accentHex: String
 ) {
-    DEFAULT_DARK("default_dark", "Default Dark", "#101010", "#CCCCCC", "#007ACC"),
-    DEFAULT_LIGHT("default_light", "Default Light", "#FFFFFF", "#101010", "#007ACC"),
+    DEFAULT_DARK("default_dark", "Default Dark", "#0B0D11", "#F2F4F8", "#6BA5FF"),
+    DEFAULT_LIGHT("default_light", "Default Light", "#F7F8FA", "#0E131F", "#1D64E6"),
     HIGH_CONTRAST("high_contrast", "High Contrast", "#000000", "#FFFFFF", "#00FFFF"),
     CYBERPUNK("cyberpunk", "Cyberpunk", "#0B001A", "#00FFCC", "#FF0055"),
     SOLARIZED("solarized", "Solarized Dark", "#002B36", "#839496", "#268BD2"),

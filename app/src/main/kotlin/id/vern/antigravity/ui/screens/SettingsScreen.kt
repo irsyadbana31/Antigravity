@@ -138,7 +138,6 @@ import id.vern.antigravity.data.AvailableModelInfo
 import id.vern.antigravity.data.SubscriptionTierType
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.ui.components.LogViewer
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.ui.theme.AntigravityAmber
@@ -384,9 +383,9 @@ fun MainSettingsPage(
 
         Text(
             text = "Settings",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
         )
 
@@ -444,7 +443,7 @@ fun MainSettingsPage(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(if (userEmail != null) AntigravityBlue.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant),
+                    .background(if (userEmail != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (!userPicture.isNullOrBlank()) {
@@ -459,7 +458,7 @@ fun MainSettingsPage(
                         text = (userName.takeIf { it.isNotBlank() } ?: "U").take(1).uppercase(),
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = AntigravityBlue
+                        color = MaterialTheme.colorScheme.primary
                     )
                 } else {
                     Icon(
@@ -559,14 +558,14 @@ fun SubSheetHeader(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = stringResource(R.string.common_back),
                 modifier = Modifier.size(16.dp),
-                tint = AntigravityBlue
+                tint = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = stringResource(R.string.common_back),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Medium,
-                color = AntigravityBlue
+                color = MaterialTheme.colorScheme.primary
             )
         }
 
@@ -718,7 +717,7 @@ fun PermissionRulesCard(
                                     .weight(1f)
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    .border(1.dp, AntigravityBlue, RoundedCornerShape(6.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
                                     .padding(horizontal = 10.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -737,7 +736,7 @@ fun PermissionRulesCard(
                                         color = MaterialTheme.colorScheme.onSurface,
                                         fontFamily = FontFamily.Monospace
                                     ),
-                                    cursorBrush = SolidColor(AntigravityBlue),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                     singleLine = true
                                 )
                             }
@@ -845,7 +844,7 @@ fun PermissionRulesCard(
                                         .weight(1f)
                                         .clip(RoundedCornerShape(6.dp))
                                         .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                        .border(1.dp, AntigravityBlue, RoundedCornerShape(6.dp))
+                                        .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
                                         .padding(horizontal = 10.dp, vertical = 8.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
@@ -857,7 +856,7 @@ fun PermissionRulesCard(
                                             color = MaterialTheme.colorScheme.onSurface,
                                             fontFamily = FontFamily.Monospace
                                         ),
-                                        cursorBrush = SolidColor(AntigravityBlue),
+                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                         singleLine = true
                                     )
                                 }
@@ -1067,7 +1066,10 @@ fun GeneralSettingsPage(
                                 Switch(
                                     checked = notifyOnCompletion,
                                     onCheckedChange = { viewModel.setNotifyOnCompletion(context, it) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AntigravityBlue)
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                                    )
                                 )
                             }
                         }
@@ -1619,7 +1621,7 @@ fun CircularQuotaRow(
         ) {
             Text(
                 text = "$percentage%",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                 fontWeight = FontWeight.Bold,
                 color = if (disabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
             )
@@ -1628,8 +1630,10 @@ fun CircularQuotaRow(
                 modifier = Modifier.size(32.dp)
             ) {
                 val sweepAngle = (percentage / 100f) * 360f
+                val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                val disabledColor = MaterialTheme.colorScheme.outlineVariant
                 val strokeColor = when {
-                    disabled -> Color(0xFF3F3F46)
+                    disabled -> disabledColor
                     percentage == 0 -> Color(0xFFEF5350)
                     percentage < 50 -> Color(0xFFFFB300)
                     else -> AntigravityGreen
@@ -1640,7 +1644,7 @@ fun CircularQuotaRow(
                         .padding(2.dp)
                 ) {
                     drawArc(
-                        color = Color(0xFF27272A),
+                        color = trackColor,
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,
@@ -1738,7 +1742,10 @@ fun ModelsAndUsageSettingsPage(
                         Spacer(modifier = Modifier.height(20.dp))
                         Button(
                             onClick = { viewModel.startGoogleSignIn(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -1794,7 +1801,7 @@ fun ModelsAndUsageSettingsPage(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(
-                            color = AntigravityBlue,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(32.dp),
                             strokeWidth = 3.dp
                         )
@@ -1826,7 +1833,10 @@ fun ModelsAndUsageSettingsPage(
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = { viewModel.refreshUserQuota(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
@@ -1877,15 +1887,17 @@ fun ModelsAndUsageSettingsPage(
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(upgradeUri))
                                     context.startActivity(intent)
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                             ) {
                                 Text(
                                     text = stringResource(R.string.common_btn_upgrade),
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -1921,8 +1933,8 @@ fun ModelsAndUsageSettingsPage(
                             checked = enableCreditOverages,
                             onCheckedChange = { viewModel.setEnableCreditOverages(context, it) },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = AntigravityBlue
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
                             )
                         )
                     }
@@ -2024,7 +2036,7 @@ fun ModelsAndUsageSettingsPage(
                                     )
                                 }
                                 val pColor = when (provider) {
-                                    "Google" -> AntigravityBlue
+                                    "Google" -> MaterialTheme.colorScheme.primary
                                     "OpenAI" -> AntigravityGreen
                                     else -> Color(0xFFD97706)
                                 }
@@ -2164,7 +2176,7 @@ fun CustomizationsSettingsPage(
                         usedTokens = tokenStats.rulesTokens,
                         totalTokens = tokenStats.totalLimit,
                         percentage = rulesPct,
-                        color = AntigravityBlue,
+                        color = MaterialTheme.colorScheme.primary,
                         isExpanded = showRulesBreakdown,
                         breakdownLabel = "Show ${tokenStats.rulesBreakdowns.size} breakdowns",
                         onToggleBreakdown = { showRulesBreakdown = !showRulesBreakdown },
@@ -2336,7 +2348,10 @@ fun CustomizationsSettingsPage(
                         onClick = { showAddMcpDialog = true },
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         modifier = Modifier.height(30.dp)
                     ) {
                         Text(stringResource(R.string.mcp_btn_add), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2394,7 +2409,10 @@ fun CustomizationsSettingsPage(
                                                 showDeleteServerConfirm = false
                                             },
                                             shape = RoundedCornerShape(8.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.error,
+                                                contentColor = MaterialTheme.colorScheme.onError
+                                            )
                                         ) {
                                             Text(stringResource(R.string.settings_mcp_delete_btn))
                                         }
@@ -2424,13 +2442,13 @@ fun CustomizationsSettingsPage(
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
-                                            color = if (server.isRemote) Color(0xFF6366F1).copy(alpha = 0.2f) else AntigravityBlue.copy(alpha = 0.2f)
+                                            color = if (server.isRemote) Color(0xFF6366F1).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                                         ) {
                                             Text(
                                                 text = if (server.isRemote) "Remote HTTP" else "Stdio",
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Medium,
-                                                color = if (server.isRemote) Color(0xFF818CF8) else AntigravityBlue,
+                                                color = if (server.isRemote) Color(0xFF818CF8) else MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                             )
                                         }
@@ -2643,7 +2661,10 @@ fun RulesManagementDialog(
                         }
                     },
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
                     Text(stringResource(R.string.settings_rules_btn_create))
                 }
@@ -2673,7 +2694,10 @@ fun RulesManagementDialog(
                     onClick = { isCreatingNew = true },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
                     modifier = Modifier.height(28.dp)
                 ) {
                     Text(stringResource(R.string.settings_rules_btn_new), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2726,13 +2750,13 @@ fun RulesManagementDialog(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = AntigravityBlue.copy(alpha = 0.15f)
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                     ) {
                                         Text(
                                             text = rule.source,
                                             fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = AntigravityBlue,
+                                            color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                         )
                                     }
@@ -2801,7 +2825,10 @@ fun RuleEditorDialog(
                         onDelete()
                     },
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) {
                     Text(stringResource(R.string.settings_rules_btn_delete))
                 }
@@ -2865,7 +2892,7 @@ fun RuleEditorDialog(
                             fontSize = 12.sp,
                             lineHeight = 16.sp
                         ),
-                        cursorBrush = SolidColor(AntigravityBlue)
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
                     )
                 }
             }
@@ -2874,7 +2901,10 @@ fun RuleEditorDialog(
             Button(
                 onClick = { onSave(contentText) },
                 shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
                 Text(stringResource(R.string.settings_rules_btn_save))
             }
@@ -2918,23 +2948,33 @@ fun AddMcpServerDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (transportType == 0) AntigravityBlue else Color.Transparent)
+                                .background(if (transportType == 0) MaterialTheme.colorScheme.primary else Color.Transparent)
                                 .clickable { transportType = 0 }
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(stringResource(R.string.settings_mcp_tab_stdio), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (transportType == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                stringResource(R.string.settings_mcp_tab_stdio),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (transportType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (transportType == 1) AntigravityBlue else Color.Transparent)
+                                .background(if (transportType == 1) MaterialTheme.colorScheme.primary else Color.Transparent)
                                 .clickable { transportType = 1 }
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(stringResource(R.string.settings_mcp_tab_http), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (transportType == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                stringResource(R.string.settings_mcp_tab_http),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (transportType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -2997,7 +3037,10 @@ fun AddMcpServerDialog(
                     }
                 },
                 shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
                 Text(stringResource(R.string.settings_mcp_btn_install))
             }
@@ -3036,7 +3079,7 @@ fun RawMcpConfigDialog(
                         onValueChange = { rawText = it },
                         modifier = Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState()),
                         textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
-                        cursorBrush = SolidColor(AntigravityBlue)
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
                     )
                 }
             }
@@ -3045,7 +3088,10 @@ fun RawMcpConfigDialog(
             Button(
                 onClick = { onSave(rawText) },
                 shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
                 Text(stringResource(R.string.settings_mcp_btn_save))
             }
@@ -3107,56 +3153,65 @@ fun AppearanceSettingsPage(
                         .padding(14.dp)
                 ) {
                     Text(stringResource(R.string.settings_theme_label), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (appearance.themeMode == ThemeMode.SYSTEM) AntigravityBlue else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.setThemeMode(context, ThemeMode.SYSTEM) }
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.padding(2.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Computer,
-                                    contentDescription = stringResource(R.string.theme_mode_system),
-                                    tint = if (appearance.themeMode == ThemeMode.SYSTEM) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (appearance.themeMode == ThemeMode.SYSTEM) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { viewModel.setThemeMode(context, ThemeMode.SYSTEM) }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Computer,
+                                        contentDescription = stringResource(R.string.theme_mode_system),
+                                        tint = if (appearance.themeMode == ThemeMode.SYSTEM) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (appearance.themeMode == ThemeMode.LIGHT) AntigravityBlue else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.setThemeMode(context, ThemeMode.LIGHT) }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.LightMode,
-                                    contentDescription = stringResource(R.string.theme_mode_light),
-                                    tint = if (appearance.themeMode == ThemeMode.LIGHT) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (appearance.themeMode == ThemeMode.LIGHT) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { viewModel.setThemeMode(context, ThemeMode.LIGHT) }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.LightMode,
+                                        contentDescription = stringResource(R.string.theme_mode_light),
+                                        tint = if (appearance.themeMode == ThemeMode.LIGHT) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (appearance.themeMode == ThemeMode.DARK) AntigravityBlue else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.setThemeMode(context, ThemeMode.DARK) }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.DarkMode,
-                                    contentDescription = stringResource(R.string.theme_mode_dark),
-                                    tint = if (appearance.themeMode == ThemeMode.DARK) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (appearance.themeMode == ThemeMode.DARK) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { viewModel.setThemeMode(context, ThemeMode.DARK) }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.DarkMode,
+                                        contentDescription = stringResource(R.string.theme_mode_dark),
+                                        tint = if (appearance.themeMode == ThemeMode.DARK) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -3288,7 +3343,7 @@ fun AppearanceSettingsPage(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(stringResource(R.string.theme_color_accent), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.height(4.dp))
-                            val accentColorParsed = parseColorOrNull(displayAccent) ?: AntigravityBlue
+                            val accentColorParsed = parseColorOrNull(displayAccent) ?: MaterialTheme.colorScheme.primary
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = accentColorParsed.copy(alpha = 0.18f),
@@ -3336,7 +3391,10 @@ fun AppearanceSettingsPage(
                         Switch(
                             checked = verboseThinking,
                             onCheckedChange = { viewModel.setVerboseThinking(context, it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AntigravityBlue)
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
                         )
                     }
 
@@ -3557,7 +3615,7 @@ fun AccountSettingsPage(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
-                                .background(if (userEmail != null) AntigravityBlue else MaterialTheme.colorScheme.surfaceVariant),
+                                .background(if (userEmail != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             if (!userPicture.isNullOrBlank()) {
@@ -3572,7 +3630,7 @@ fun AccountSettingsPage(
                                     text = (userName.takeIf { it.isNotBlank() } ?: "U").take(1).uppercase(),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 20.sp,
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onPrimary
                                 )
                             } else {
                                 Icon(
@@ -3598,7 +3656,7 @@ fun AccountSettingsPage(
                                         shape = RoundedCornerShape(12.dp),
                                         color = when (tierType) {
                                             SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                                            SubscriptionTierType.PRO -> AntigravityBlue.copy(alpha = 0.15f)
+                                            SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                             SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
                                             else -> MaterialTheme.colorScheme.surfaceVariant
                                         }
@@ -3614,7 +3672,7 @@ fun AccountSettingsPage(
                                             fontWeight = FontWeight.Bold,
                                             color = when (tierType) {
                                                 SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary
-                                                SubscriptionTierType.PRO -> AntigravityBlue
+                                                SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary
                                                 SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary
                                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                                             },
@@ -3716,7 +3774,10 @@ fun AccountSettingsPage(
                     if (userEmail != null) {
                         Button(
                             onClick = { onNavigateTo(SettingsPage.MODELS_AND_USAGE) },
-                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -3767,7 +3828,10 @@ fun AccountSettingsPage(
                             onClick = {
                                 viewModel.startGoogleSignIn(context)
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -3861,7 +3925,7 @@ fun AccountSettingsPage(
                                                 shape = RoundedCornerShape(10.dp),
                                                 color = when (acc.tierType) {
                                                     SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                                                    SubscriptionTierType.PRO -> AntigravityBlue.copy(alpha = 0.15f)
+                                                    SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                                     SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
                                                     else -> MaterialTheme.colorScheme.surfaceVariant
                                                 }
@@ -3877,7 +3941,7 @@ fun AccountSettingsPage(
                                                     fontWeight = FontWeight.Bold,
                                                     color = when (acc.tierType) {
                                                         SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary
-                                                        SubscriptionTierType.PRO -> AntigravityBlue
+                                                        SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary
                                                         SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary
                                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                                     },
@@ -3922,7 +3986,10 @@ fun AccountSettingsPage(
 
                         Button(
                             onClick = { viewModel.startGoogleSignIn(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -4125,7 +4192,7 @@ fun DeveloperSettingsPage(
                                 Text(
                                     text = statusText,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (state.isUpdateAvailable) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (state.isUpdateAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -4133,7 +4200,7 @@ fun DeveloperSettingsPage(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -4177,7 +4244,10 @@ fun DeveloperSettingsPage(
                                     viewModel.applyCoreEngineUpdate(context)
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(
@@ -4270,9 +4340,9 @@ fun SettingsCard(
     content: @Composable () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = modifier.fillMaxWidth(),
         content = content
     )
@@ -4300,6 +4370,7 @@ fun CircularQuotaIndicator(
     percentage: Int,
     modifier: Modifier = Modifier
 ) {
+    val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier.size(44.dp)
@@ -4308,7 +4379,7 @@ fun CircularQuotaIndicator(
         Canvas(modifier = Modifier.fillMaxSize().padding(4.dp)) {
 
             drawArc(
-                color = Color(0xFF27272A),
+                color = trackColor,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -4325,7 +4396,7 @@ fun CircularQuotaIndicator(
         }
         Text(
             text = "$percentage%",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
             fontWeight = FontWeight.Bold,
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface
@@ -4358,7 +4429,7 @@ fun TokenUsageItem(
             )
             Text(
                 text = "%,d / %,d [%.1f%%]".format(usedTokens, totalTokens, percentage),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -4372,7 +4443,7 @@ fun TokenUsageItem(
                 .height(6.dp)
                 .clip(RoundedCornerShape(3.dp)),
             color = color,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
         )
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -4380,7 +4451,7 @@ fun TokenUsageItem(
         Text(
             text = if (isExpanded) "Hide breakdowns" else breakdownLabel,
             style = MaterialTheme.typography.labelSmall,
-            color = AntigravityBlue,
+            color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Medium,
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
@@ -4489,7 +4560,10 @@ fun CustomizationManagementDialog(
                         onClick = { showAddDialog = true },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(stringResource(R.string.customization_btn_custom), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -4506,7 +4580,7 @@ fun CustomizationManagementDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (selectedTab == 0) AntigravityBlue else Color.Transparent)
+                                .background(if (selectedTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent)
                                 .clickable { selectedTab = 0 }
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
@@ -4515,14 +4589,14 @@ fun CustomizationManagementDialog(
                                 text = "${stringResource(R.string.customization_tab_installed)} (${itemsList.size})",
                                 fontSize = 12.sp,
                                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (selectedTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (selectedTab == 1) AntigravityBlue else Color.Transparent)
+                                .background(if (selectedTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent)
                                 .clickable { selectedTab = 1 }
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
@@ -4531,7 +4605,7 @@ fun CustomizationManagementDialog(
                                 text = "${stringResource(R.string.customization_tab_marketplace)} (${catalogueItems.size})",
                                 fontSize = 12.sp,
                                 fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (selectedTab == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -4630,12 +4704,12 @@ fun CustomizationManagementDialog(
                                         val badgeColor = when {
                                             item.isBuiltIn -> MaterialTheme.colorScheme.surfaceVariant
                                             isFromPlugin -> AntigravityGreen.copy(alpha = 0.2f)
-                                            else -> AntigravityBlue.copy(alpha = 0.2f)
+                                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                                         }
                                         val badgeTextColor = when {
                                             item.isBuiltIn -> MaterialTheme.colorScheme.onSurfaceVariant
                                             isFromPlugin -> AntigravityGreen
-                                            else -> AntigravityBlue
+                                            else -> MaterialTheme.colorScheme.primary
                                         }
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
@@ -4760,13 +4834,13 @@ fun CustomizationManagementDialog(
                                 if (kind.isSkill && item.repoUrl.isNotBlank() && (item.subPath.isNullOrBlank() || item.id == "antigravity-skills-manager")) {
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = AntigravityBlue.copy(alpha = 0.15f)
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                     ) {
                                         Text(
                                             text = stringResource(R.string.customization_vault_badge),
                                             fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AntigravityBlue,
+                                            color = MaterialTheme.colorScheme.primary,
                                             maxLines = 1,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
@@ -4820,13 +4894,17 @@ fun CustomizationManagementDialog(
                                         enabled = false,
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                         shape = RoundedCornerShape(6.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue.copy(alpha = 0.6f)),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                                            disabledContentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
                                         modifier = Modifier.height(30.dp)
                                     ) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(12.dp),
                                             strokeWidth = 2.dp,
-                                            color = Color.White
+                                            color = MaterialTheme.colorScheme.onPrimary
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(stringResource(R.string.customization_btn_installing), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -4855,7 +4933,10 @@ fun CustomizationManagementDialog(
                                             },
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                             shape = RoundedCornerShape(6.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
                                             modifier = Modifier.height(30.dp)
                                         ) {
                                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
@@ -4873,7 +4954,10 @@ fun CustomizationManagementDialog(
                                             },
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                             shape = RoundedCornerShape(6.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
                                             modifier = Modifier.height(30.dp)
                                         ) {
                                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
@@ -4925,7 +5009,7 @@ fun CustomizationManagementDialog(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (addTab == 0) AntigravityBlue else Color.Transparent)
+                                    .background(if (addTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent)
                                     .clickable { addTab = 0 }
                                     .padding(vertical = 5.dp),
                                 contentAlignment = Alignment.Center
@@ -4934,14 +5018,14 @@ fun CustomizationManagementDialog(
                                     text = stringResource(R.string.customization_tab_git_repo),
                                     fontSize = 11.sp,
                                     fontWeight = if (addTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (addTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (addTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (addTab == 1) AntigravityBlue else Color.Transparent)
+                                    .background(if (addTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent)
                                     .clickable { addTab = 1 }
                                     .padding(vertical = 5.dp),
                                 contentAlignment = Alignment.Center
@@ -4950,7 +5034,7 @@ fun CustomizationManagementDialog(
                                     text = stringResource(R.string.customization_tab_manual),
                                     fontSize = 11.sp,
                                     fontWeight = if (addTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (addTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (addTab == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -4996,7 +5080,10 @@ fun CustomizationManagementDialog(
                                     },
                                     enabled = repoUrl.isNotBlank() && !isInspectingRepo,
                                     shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                     modifier = Modifier.height(52.dp)
                                 ) {
@@ -5004,7 +5091,7 @@ fun CustomizationManagementDialog(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
                                             strokeWidth = 2.dp,
-                                            color = Color.White
+                                            color = MaterialTheme.colorScheme.onPrimary
                                         )
                                     } else {
                                         Icon(Icons.Default.Search, contentDescription = stringResource(R.string.customization_btn_inspect_repo), modifier = Modifier.size(16.dp))
@@ -5020,11 +5107,11 @@ fun CustomizationManagementDialog(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.padding(vertical = 4.dp)
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = AntigravityBlue)
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                                 Text(
                                     stringResource(R.string.customization_inspecting_repo),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = AntigravityBlue
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -5106,7 +5193,7 @@ fun CustomizationManagementDialog(
                                                         text = skill.subPath,
                                                         fontSize = 10.sp,
                                                         fontFamily = FontFamily.Monospace,
-                                                        color = AntigravityBlue
+                                                        color = MaterialTheme.colorScheme.primary
                                                     )
                                                 }
                                             }
@@ -5351,7 +5438,7 @@ fun AboutSettingsPage(
                                 text = stringResource(R.string.about_creator),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -5371,7 +5458,7 @@ fun AboutSettingsPage(
                         text = stringResource(R.string.about_repo_name),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = AntigravityBlue
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = stringResource(R.string.about_repo_desc),
@@ -5573,7 +5660,7 @@ fun AboutSettingsPage(
                                 text = stringResource(titleRes),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 fontWeight = FontWeight.SemiBold,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(

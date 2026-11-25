@@ -2,13 +2,16 @@ package id.vern.antigravity.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,8 +35,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -70,7 +71,6 @@ import id.vern.antigravity.data.ModelAvailability
 import id.vern.antigravity.data.UserQuotaSummary
 import id.vern.antigravity.service.AgyModelsService
 import id.vern.antigravity.service.CliModel
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 
 val ThinkingEfforts = listOf("Low", "Medium", "High")
@@ -239,7 +239,7 @@ fun ModelSelectorDialog(
                         shape = RoundedCornerShape(12.dp),
                         color = when (tierType) {
                             SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                            SubscriptionTierType.PRO -> AntigravityBlue.copy(alpha = 0.15f)
+                            SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                             SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
                             else -> MaterialTheme.colorScheme.surfaceVariant
                         }
@@ -255,7 +255,7 @@ fun ModelSelectorDialog(
                             fontWeight = FontWeight.Bold,
                             color = when (tierType) {
                                 SubscriptionTierType.ULTRA -> MaterialTheme.colorScheme.tertiary
-                                SubscriptionTierType.PRO -> AntigravityBlue
+                                SubscriptionTierType.PRO -> MaterialTheme.colorScheme.primary
                                 SubscriptionTierType.ENTERPRISE -> MaterialTheme.colorScheme.secondary
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
@@ -289,17 +289,17 @@ fun ModelSelectorDialog(
                         val isAvailableForAccount = modelAvailability != ModelAvailability.UNAVAILABLE
 
                         Card(
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
-                                else if (!isAvailableForAccount) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                else if (!isAvailableForAccount) MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.surfaceContainerLow
                             ),
-                            border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isAvailableForAccount) 0.3f else 0.15f)),
+                            border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isAvailableForAccount) 0.55f else 0.25f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .clickable {
                                     if (isAvailableForAccount) {
                                         onModelSelected(model.id, selectedThinking, model.cliIdFor(selectedThinking))
@@ -375,7 +375,7 @@ fun ModelSelectorDialog(
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -422,42 +422,61 @@ fun ModelSelectorDialog(
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text(
-                                            text = "Reasoning:",
+                                            text = "Reasoning",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                        model.efforts.forEach { effort ->
-                                            val isEffortSelected = selectedThinking.equals(effort, ignoreCase = true)
-                                            FilterChip(
-                                                selected = isEffortSelected,
-                                                onClick = {
-
-                                                    onModelSelected(model.id, effort, model.cliIdFor(effort))
-                                                },
-                                                label = {
-                                                    Text(
-                                                        text = effort,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = if (isEffortSelected) FontWeight.Bold else FontWeight.Normal
-                                                    )
-                                                },
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                                    selectedLabelColor = MaterialTheme.colorScheme.onSurface
-                                                ),
-                                                border = FilterChipDefaults.filterChipBorder(
-                                                    enabled = true,
-                                                    selected = isEffortSelected,
-                                                    borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                                    selectedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                                ),
-                                                shape = RoundedCornerShape(8.dp),
-                                                modifier = Modifier.height(26.dp)
-                                            )
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(IntrinsicSize.Min)
+                                                    .padding(2.dp)
+                                            ) {
+                                                model.efforts.forEachIndexed { idx, effort ->
+                                                    val isEffortSelected = selectedThinking.equals(effort, ignoreCase = true)
+                                                    if (idx > 0) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .width(1.dp)
+                                                                .fillMaxHeight()
+                                                                .padding(vertical = 4.dp)
+                                                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                                        )
+                                                    }
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(
+                                                                if (isEffortSelected) MaterialTheme.colorScheme.primaryContainer
+                                                                else Color.Transparent
+                                                            )
+                                                            .clickable {
+                                                                onModelSelected(model.id, effort, model.cliIdFor(effort))
+                                                            }
+                                                            .padding(vertical = 6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = effort,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = if (isEffortSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                            color = if (isEffortSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -513,7 +532,7 @@ fun ModelSelectorDialog(
                             text = stringResource(R.string.model_btn_view_usage),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = AntigravityBlue
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -624,15 +643,17 @@ fun UsageLimitsDialog(
                                             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(upgradeUri))
                                             context.startActivity(intent)
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                                     ) {
                                         Text(
                                             text = stringResource(R.string.common_btn_upgrade),
                                             fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
@@ -738,7 +759,7 @@ private fun QuotaLimitItemRow(
         ) {
             Text(
                 text = "$percentage%",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                 fontWeight = FontWeight.Bold,
                 color = if (disabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
             )
@@ -747,8 +768,10 @@ private fun QuotaLimitItemRow(
                 modifier = Modifier.size(32.dp)
             ) {
                 val sweepAngle = (percentage / 100f) * 360f
+                val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                val disabledColor = MaterialTheme.colorScheme.outlineVariant
                 val strokeColor = when {
-                    disabled -> Color(0xFF3F3F46)
+                    disabled -> disabledColor
                     percentage == 0 -> Color(0xFFEF5350)
                     percentage < 50 -> Color(0xFFFFB300)
                     else -> AntigravityGreen
@@ -759,7 +782,7 @@ private fun QuotaLimitItemRow(
                         .padding(2.dp)
                 ) {
                     drawArc(
-                        color = Color(0xFF27272A),
+                        color = trackColor,
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,

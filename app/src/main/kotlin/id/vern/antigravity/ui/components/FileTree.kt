@@ -53,7 +53,6 @@ import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
 import id.vern.antigravity.data.ProjectFile
 import id.vern.antigravity.ui.theme.AntigravityAmber
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import java.io.File
 
@@ -341,7 +340,7 @@ private fun FileTreeItem(
                 imageVector = getFileIcon(item.extension),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
-                tint = getFileColor(item.extension)
+                tint = getFileColor(item.extension, MaterialTheme.colorScheme.primary)
             )
         }
 
@@ -400,7 +399,7 @@ private fun getFileIcon(ext: String): ImageVector {
     }
 }
 
-private fun getFileColor(ext: String): Color {
+private fun getFileColor(ext: String, mdColor: Color): Color {
     return when (ext) {
         "kt" -> Color(0xFF7F52FF)
         "java" -> Color(0xFFE76F00)
@@ -408,7 +407,7 @@ private fun getFileColor(ext: String): Color {
         "js", "ts" -> Color(0xFFF7DF1E)
         "sh", "bash" -> AntigravityGreen
         "json", "xml", "yaml", "yml" -> AntigravityAmber
-        "md" -> AntigravityBlue
+        "md" -> mdColor
         else -> Color(0xFF94A3B8)
     }
 }

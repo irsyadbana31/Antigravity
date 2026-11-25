@@ -234,7 +234,7 @@
     <string name="chat_edited">Mengubah</string>
     <string name="chat_search">Mencari</string>
     <string name="chat_mentions_header">Penyebutan (@)</string>
-    <string name="chat_actions_empty">Perintah CLI belum dimuat — buka lagi menunya atau periksa engine</string>
+    <string name="chat_actions_empty">Perintah CLI belum dimuat. Buka lagi menunya atau periksa engine</string>
     <string name="chat_mention_workspace">Konteks seluruh workspace</string>
     <string name="chat_mention_terminal">Output terminal terbaru</string>
     <string name="chat_mention_git">Status &amp; diff git</string>
@@ -565,6 +565,7 @@
     <string name="chat_empty_subheadline">Tanyakan apa saja, jalankan perintah bash Linux, atau buat aplikasi dengan tools agent native.</string>
     <string name="chat_empty_install_skills">Instal Skill</string>
     <string name="chat_empty_install_plugins">Instal Plugin</string>
+    <string name="chat_workspace_default">Workspace Utama</string>
     <string name="chat_assistant_response">Respons Asisten</string>
 
     <string name="nav_item_chat">Chat</string>

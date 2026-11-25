@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
 import id.vern.antigravity.data.ChatMessage
 import id.vern.antigravity.data.RunningSubagent
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.viewmodel.AntigravityViewModel
@@ -165,12 +164,12 @@ fun SubagentChatBottomSheet(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(AntigravityBlue.copy(alpha = 0.12f))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                 ) {
                     Icon(
                         imageVector = Icons.Default.SmartToy,
                         contentDescription = null,
-                        tint = AntigravityBlue,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -208,14 +207,14 @@ fun SubagentChatBottomSheet(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(10.dp),
                                 strokeWidth = 1.5.dp,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = stringResource(R.string.subagent_chat_running),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                         } else {
                             Icon(
@@ -270,7 +269,7 @@ fun SubagentChatBottomSheet(
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             strokeWidth = 2.5.dp,
-                            color = AntigravityBlue
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
@@ -315,7 +314,7 @@ fun SubagentChatBottomSheet(
                         CircularProgressIndicator(
                             modifier = Modifier.size(12.dp),
                             strokeWidth = 2.dp,
-                            color = AntigravityBlue
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(

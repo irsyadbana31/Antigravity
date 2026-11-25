@@ -234,7 +234,7 @@
     <string name="chat_edited">Edited</string>
     <string name="chat_search">Search</string>
     <string name="chat_mentions_header">Mentions (@)</string>
-    <string name="chat_actions_empty">CLI commands not loaded yet — open the menu again or check the engine</string>
+    <string name="chat_actions_empty">CLI commands not loaded yet. Open the menu again or check the engine</string>
     <string name="chat_mention_workspace">Entire workspace context</string>
     <string name="chat_mention_terminal">Recent terminal output</string>
     <string name="chat_mention_git">Git status &amp; diffs</string>
@@ -565,6 +565,7 @@
     <string name="chat_empty_subheadline">Ask anything, execute Linux bash commands, or build apps with native agent tools.</string>
     <string name="chat_empty_install_skills">Install Skills</string>
     <string name="chat_empty_install_plugins">Install Plugin</string>
+    <string name="chat_workspace_default">Home Workspace</string>
     <string name="chat_assistant_response">Assistant Response</string>
 
     <string name="nav_item_chat">Chat</string>

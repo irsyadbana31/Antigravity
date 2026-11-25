@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import id.vern.antigravity.R
-import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.viewmodel.CustomizationInstallProgress
@@ -87,7 +86,7 @@ fun InstallationProgressDialog(
                     Icon(
                         imageVector = Icons.Default.Terminal,
                         contentDescription = null,
-                        tint = AntigravityBlue,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -111,7 +110,7 @@ fun InstallationProgressDialog(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = AntigravityBlue
+                            color = MaterialTheme.colorScheme.primary
                         )
                     } else {
                         Icon(

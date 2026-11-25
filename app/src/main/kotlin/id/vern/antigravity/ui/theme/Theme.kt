@@ -217,7 +217,7 @@ fun buildColorScheme(
         )
         ThemePreset.DEFAULT_LIGHT -> {
             val (primary, onPrimary, primaryContainer, onPrimaryContainer) = when (accent) {
-                AccentColor.DEFAULT, AccentColor.BLUE -> listOf(AccentBlueLight, Color.White, Color(0xFFE3EDFE), Color(0xFF062E6F))
+                AccentColor.DEFAULT, AccentColor.BLUE -> listOf(AccentBlueLight, LightOnPrimary, LightPrimaryContainer, LightOnPrimaryContainer)
                 AccentColor.RED -> listOf(AccentRedLight, Color.White, Color(0xFFFFDAD6), Color(0xFF410002))
                 AccentColor.YELLOW -> listOf(AccentYellowLight, Color.White, Color(0xFFFFEFD2), Color(0xFF452B00))
                 AccentColor.GREEN -> listOf(AccentGreenLight, Color.White, Color(0xFFD1FAE5), Color(0xFF003923))
@@ -245,14 +245,15 @@ fun buildColorScheme(
                 surfaceContainerHighest = LightSurfaceContainerHighest,
                 outline = LightOutline,
                 outlineVariant = LightOutlineVariant,
-                error = AntigravityRed
+                error = LightError,
+                onError = LightOnError
             )
         }
         ThemePreset.DEFAULT_DARK -> {
             val (primary, onPrimary, primaryContainer, onPrimaryContainer) = when (accent) {
                 AccentColor.DEFAULT, AccentColor.BLUE -> {
-                    if (darkTheme) listOf(AccentBlueDark, Color(0xFF002B75), Color(0xFF1B4D9E), Color(0xFFD3E3FD))
-                    else listOf(AccentBlueLight, Color.White, Color(0xFFE3EDFE), Color(0xFF062E6F))
+                    if (darkTheme) listOf(AccentBlueDark, DarkOnPrimary, DarkPrimaryContainer, DarkOnPrimaryContainer)
+                    else listOf(AccentBlueLight, LightOnPrimary, LightPrimaryContainer, LightOnPrimaryContainer)
                 }
                 AccentColor.RED -> {
                     if (darkTheme) listOf(AccentRedDark, Color(0xFF560000), Color(0xFF930006), Color(0xFFFFDAD4))
@@ -295,7 +296,8 @@ fun buildColorScheme(
                     surfaceContainerHighest = DarkSurfaceContainerHighest,
                     outline = DarkOutline,
                     outlineVariant = DarkOutlineVariant,
-                    error = AntigravityRed
+                    error = DarkError,
+                    onError = DarkOnError
                 )
             } else {
                 lightColorScheme(
@@ -320,21 +322,22 @@ fun buildColorScheme(
                     surfaceContainerHighest = LightSurfaceContainerHighest,
                     outline = LightOutline,
                     outlineVariant = LightOutlineVariant,
-                    error = AntigravityRed
+                    error = LightError,
+                    onError = LightOnError
                 )
             }
         }
     }
 }
 
-val AntigravityMenuShape = RoundedCornerShape(16.dp)
+val AntigravityMenuShape = RoundedCornerShape(14.dp)
 
 val AntigravityShapes = androidx.compose.material3.Shapes(
-    extraSmall = RoundedCornerShape(16.dp),
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp)
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(24.dp)
 )
 
 @Composable

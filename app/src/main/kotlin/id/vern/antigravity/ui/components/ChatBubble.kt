@@ -8,16 +8,13 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +27,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -78,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -94,8 +93,6 @@ import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.TurnFileChanges
 import id.vern.antigravity.ui.theme.AntigravityAmber
-import id.vern.antigravity.ui.theme.AntigravityBlue
-import id.vern.antigravity.ui.theme.AntigravityRed
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -128,19 +125,14 @@ fun ChatBubble(
             horizontalAlignment = Alignment.End
         ) {
             Surface(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
                 modifier = Modifier
                     .widthIn(max = 500.dp)
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(18.dp)
-                    )
-                    .animateContentSize(),
-                tonalElevation = 1.dp
+                    .animateContentSize()
             ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     if (message.attachments.isNotEmpty()) {
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -210,7 +202,7 @@ fun ChatBubble(
                                                 imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(14.dp),
-                                                tint = AntigravityBlue
+                                                tint = MaterialTheme.colorScheme.primary
                                             )
                                             Spacer(modifier = Modifier.width(5.dp))
                                             Column {
@@ -293,7 +285,7 @@ fun ChatBubble(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .clickable { onUndoPrompt(message) }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -320,7 +312,7 @@ fun ChatBubble(
                                     clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.chat_btn_copy), message.content))
                                     Toast.makeText(context, toastCopiedMsg, Toast.LENGTH_SHORT).show()
                                 }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
@@ -383,7 +375,7 @@ fun ChatBubble(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(12.dp),
                                 strokeWidth = 1.8.dp,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                         }
@@ -453,7 +445,7 @@ fun ChatBubble(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(10.dp),
                                             strokeWidth = 1.5.dp,
-                                            color = AntigravityBlue
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                     }
@@ -461,6 +453,7 @@ fun ChatBubble(
                                         text = thoughtTitleText,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontSize = 11.5.sp,
+                                            fontFeatureSettings = "tnum",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
                                         )
                                     )
@@ -484,8 +477,9 @@ fun ChatBubble(
                                         exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
                                     ) {
                                         Surface(
-                                            shape = RoundedCornerShape(8.dp),
+                                            shape = RoundedCornerShape(10.dp),
                                             color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .heightIn(max = 280.dp)
@@ -543,11 +537,11 @@ fun ChatBubble(
                 )
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(
@@ -607,7 +601,7 @@ fun ChatBubble(
                                             text = message.commandOutput ?: "",
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 11.sp,
-                                            color = if (isErrorOutput) AntigravityRed else Color(0xFFD4D4D4),
+                                            color = if (isErrorOutput) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                                             lineHeight = 15.sp
                                         )
                                     }
@@ -634,8 +628,9 @@ fun ChatBubble(
                 )
 
                 Surface(
-                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     modifier = Modifier.widthIn(max = 600.dp)
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -653,7 +648,7 @@ fun ChatBubble(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(13.dp),
                                 strokeWidth = 2.dp,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -685,7 +680,8 @@ fun ChatBubble(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(max = 280.dp)
@@ -719,51 +715,50 @@ fun ChatBubble(
                     }
                 }
             } else if (message.content.isNotBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.widthIn(max = 600.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp)
+                        .padding(top = 2.dp, bottom = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        MarkdownText(
-                            markdown = message.content,
-                            textColor = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp,
-                            selectable = message.status == MessageStatus.SENT
-                        )
+                    MarkdownText(
+                        markdown = message.content,
+                        textColor = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        selectable = message.status == MessageStatus.SENT
+                    )
 
-                        val toastCopiedMsg = stringResource(R.string.chat_toast_copied)
+                    val toastCopiedMsg = stringResource(R.string.chat_toast_copied)
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp)
+                    ) {
                         Row(
-                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.chat_assistant_response), message.content))
+                                    Toast.makeText(context, toastCopiedMsg, Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.chat_assistant_response), message.content))
-                                        Toast.makeText(context, toastCopiedMsg, Toast.LENGTH_SHORT).show()
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = stringResource(R.string.chat_btn_copy),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = stringResource(R.string.chat_btn_copy),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = stringResource(R.string.chat_btn_copy),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = stringResource(R.string.chat_btn_copy),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
                         }
                     }
                 }
@@ -772,9 +767,9 @@ fun ChatBubble(
             val fileChanges = message.fileChanges
             if (fileChanges != null && fileChanges.totalFiles > 0) {
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
@@ -790,7 +785,8 @@ fun ChatBubble(
                             text = stringResource(R.string.chat_files_changed, fileChanges.totalFiles),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                fontFeatureSettings = "tnum"
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -800,7 +796,8 @@ fun ChatBubble(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = FontFamily.Monospace,
+                                fontFeatureSettings = "tnum"
                             ),
                             color = Color(0xFF4CAF50)
                         )
@@ -810,7 +807,8 @@ fun ChatBubble(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = FontFamily.Monospace,
+                                fontFeatureSettings = "tnum"
                             ),
                             color = Color(0xFFEF5350)
                         )
@@ -988,7 +986,8 @@ fun ReviewChangesDialog(
                                                         color = Color(0xFF4CAF50),
                                                         style = MaterialTheme.typography.labelSmall.copy(
                                                             fontWeight = FontWeight.Bold,
-                                                            fontFamily = FontFamily.Monospace
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontFeatureSettings = "tnum"
                                                         )
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
@@ -999,7 +998,8 @@ fun ReviewChangesDialog(
                                                         color = Color(0xFFEF5350),
                                                         style = MaterialTheme.typography.labelSmall.copy(
                                                             fontWeight = FontWeight.Bold,
-                                                            fontFamily = FontFamily.Monospace
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontFeatureSettings = "tnum"
                                                         )
                                                     )
                                                 }
@@ -1025,8 +1025,11 @@ fun ReviewChangesDialog(
                                 ) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                        val isDarkDiff = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                                        val diffWellBg = if (isDarkDiff) Color(0xFF080A0E) else MaterialTheme.colorScheme.surfaceContainerLowest
+                                        val diffCtxColor = if (isDarkDiff) Color(0xFFD4D4D4) else MaterialTheme.colorScheme.onSurface
                                         Surface(
-                                            color = Color(0xFF0F1115),
+                                            color = diffWellBg,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .heightIn(max = 240.dp)
@@ -1042,15 +1045,18 @@ fun ReviewChangesDialog(
                                                     file.diff.lines().forEach { diffLine ->
                                                         val (bgColor, textColor) = when {
                                                             diffLine.startsWith("+") && !diffLine.startsWith("+++") -> {
-                                                                Color(0xFF14301B) to Color(0xFF81C784)
+                                                                if (isDarkDiff) Color(0xFF14301B) to Color(0xFF81C784)
+                                                                else Color(0xFFE8F5E9) to Color(0xFF1B5E20)
                                                             }
                                                             diffLine.startsWith("-") && !diffLine.startsWith("---") -> {
-                                                                Color(0xFF331618) to Color(0xFFE57373)
+                                                                if (isDarkDiff) Color(0xFF331618) to Color(0xFFE57373)
+                                                                else Color(0xFFFFEBEE) to Color(0xFFB71C1C)
                                                             }
                                                             diffLine.startsWith("@@") -> {
-                                                                Color(0xFF1E2838) to Color(0xFF64B5F6)
+                                                                if (isDarkDiff) Color(0xFF1E2838) to Color(0xFF64B5F6)
+                                                                else Color(0xFFE3F2FD) to Color(0xFF0D47A1)
                                                             }
-                                                            else -> Color.Transparent to Color(0xFFD4D4D4)
+                                                            else -> Color.Transparent to diffCtxColor
                                                         }
 
                                                         Text(
@@ -1095,11 +1101,26 @@ fun AgentExecutionStepsView(
     onOpenFile: (String) -> Unit = {},
     onOpenTerminal: (String) -> Unit = {}
 ) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = modifier.fillMaxWidth()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
     ) {
-        steps.forEach { step ->
+        Box(
+            modifier = Modifier
+                .padding(start = 5.dp, end = 10.dp, top = 4.dp, bottom = 4.dp)
+                .width(1.5.dp)
+                .fillMaxHeight()
+                .background(
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f),
+                    RoundedCornerShape(1.dp)
+                )
+        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            steps.forEach { step ->
             androidx.compose.runtime.key(step.id) {
                 when (step.kind) {
                 AgentStepKind.THOUGHT -> {
@@ -1145,14 +1166,17 @@ fun AgentExecutionStepsView(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(10.dp),
                                     strokeWidth = 1.5.dp,
-                                    color = AntigravityBlue
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
                             Text(
                                 text = stepThoughtTitle,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Medium,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFeatureSettings = "tnum"
+                                ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -1272,25 +1296,34 @@ fun AgentExecutionStepsView(
                                 Text(
                                     text = parts[0],
                                     color = Color(0xFF4CAF50),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFeatureSettings = "tnum"
+                                    )
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = parts[1],
                                     color = Color(0xFFEF5350),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFeatureSettings = "tnum"
+                                    )
                                 )
                             } else {
                                 Text(
                                     text = step.diff,
                                     color = Color(0xFF4CAF50),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFeatureSettings = "tnum"
+                                    )
                                 )
                             }
                         }
@@ -1346,7 +1379,7 @@ fun AgentExecutionStepsView(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(10.dp),
                                     strokeWidth = 1.5.dp,
-                                    color = AntigravityBlue
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
@@ -1354,7 +1387,7 @@ fun AgentExecutionStepsView(
                                 imageVector = Icons.Default.Terminal,
                                 contentDescription = stringResource(R.string.chat_command_open_terminal),
                                 modifier = Modifier.size(13.dp),
-                                tint = AntigravityBlue
+                                tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
@@ -1394,13 +1427,17 @@ fun AgentExecutionStepsView(
                                 enter = expandVertically(tween(250)) + fadeIn(tween(200)),
                                 exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
                             ) {
+                                val isDarkSurface = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                                val cmdWellBg = if (isDarkSurface) Color(0xFF080A0E) else MaterialTheme.colorScheme.surfaceContainerLowest
+                                val cmdWellText = if (isDarkSurface) Color(0xFFE2E8F0) else MaterialTheme.colorScheme.onSurface
                                 Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = Color(0xFF0F1115),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = cmdWellBg,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(max = 260.dp)
-                                        .padding(start = 6.dp, top = 2.dp, bottom = 4.dp)
+                                        .padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
                                 ) {
                                     val cmdScrollState = rememberScrollState()
                                     val cmdHScrollState = rememberScrollState()
@@ -1421,7 +1458,7 @@ fun AgentExecutionStepsView(
                                             text = displayCmd,
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 10.5.sp,
-                                            color = Color(0xFFD4D4D4),
+                                            color = cmdWellText,
                                             lineHeight = 14.sp
                                         )
                                     }
@@ -1439,7 +1476,7 @@ fun AgentExecutionStepsView(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(11.dp),
                                 strokeWidth = 1.8.dp,
-                                color = AntigravityBlue
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -1452,6 +1489,7 @@ fun AgentExecutionStepsView(
                 }
             }
         }
+    }
     }
 }
 }
@@ -1466,7 +1504,7 @@ fun FileBadge(
     val (label, bg) = when {
         cleanName.equals("Dockerfile", ignoreCase = true) -> "DK" to Color(0xFF0288D1)
         cleanName.equals("Makefile", ignoreCase = true) -> "MK" to Color(0xFF78909C)
-        ext == "py" -> "🐍" to Color(0xFF388E3C)
+        ext == "py" -> "PY" to Color(0xFF2E7D32)
         ext in listOf("sh", "bash", "zsh") -> ">_" to Color(0xFF00897B)
         ext in listOf("kt", "kts", "gradle") -> "Kt" to Color(0xFF7F52FF)
         ext == "java" -> "J" to Color(0xFFE53935)
@@ -1481,9 +1519,7 @@ fun FileBadge(
         else -> "F" to Color(0xFF78909C)
     }
 
-    if (label == "🐍") {
-        Text(text = "🐍", fontSize = 11.sp, modifier = modifier)
-    } else if (label == ">_") {
+    if (label == ">_") {
         Text(
             text = ">_",
             fontSize = 10.5.sp,
@@ -1494,14 +1530,14 @@ fun FileBadge(
         )
     } else {
         Surface(
-            shape = RoundedCornerShape(3.dp),
+            shape = RoundedCornerShape(4.dp),
             color = bg.copy(alpha = 0.18f),
             border = BorderStroke(0.8.dp, bg.copy(alpha = 0.65f)),
-            modifier = modifier.height(14.dp)
+            modifier = modifier.height(15.dp)
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 3.dp)
+                modifier = Modifier.padding(horizontal = 3.5.dp)
             ) {
                 Text(
                     text = label,

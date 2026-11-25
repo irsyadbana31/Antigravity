@@ -9,12 +9,6 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,8 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
@@ -75,10 +67,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import id.vern.antigravity.R
-import id.vern.antigravity.ui.theme.AccentYellowDark
-import id.vern.antigravity.ui.theme.AntigravityBlue
-import id.vern.antigravity.ui.theme.AntigravityGreen
-import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.util.PermissionHelper
 import id.vern.antigravity.viewmodel.AntigravityViewModel
 
@@ -193,44 +181,6 @@ fun SplashScreen(
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "SplashDotAnim")
-    val dot1Scale by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, delayMillis = 0, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Dot1"
-    )
-    val dot2Scale by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, delayMillis = 200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Dot2"
-    )
-    val dot3Scale by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, delayMillis = 400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Dot3"
-    )
-    val dot4Scale by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, delayMillis = 600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Dot4"
-    )
-
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = modifier.fillMaxSize()
@@ -276,7 +226,7 @@ fun SplashScreen(
                 if (bootError != null) {
                     Text(
                         text = bootError ?: stringResource(R.string.splash_error_bootstrap_extract),
-                        color = AntigravityRed,
+                        color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -288,14 +238,14 @@ fun SplashScreen(
                             modifier = Modifier
                                 .fillMaxWidth(0.95f)
                                 .height(140.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF15181E))
-                                .border(1.dp, Color(0xFF2E3440), RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
                                 .padding(10.dp)
                         ) {
                             Text(
                                 text = bootErrorDetail ?: "",
-                                color = Color(0xFFFF8585),
+                                color = MaterialTheme.colorScheme.error,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp,
@@ -365,13 +315,13 @@ fun SplashScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(AntigravityBlue.copy(alpha = 0.15f)),
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Security,
                                     contentDescription = null,
-                                    tint = AntigravityBlue,
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -402,7 +352,10 @@ fun SplashScreen(
                                     proceedToStoragePermission()
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
                             ) {
                                 Text(
                                     text = stringResource(R.string.splash_permission_grant_btn),
@@ -412,54 +365,28 @@ fun SplashScreen(
                         }
                     }
                 } else {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .scale(dot1Scale)
-                                .clip(CircleShape)
-                                .background(AntigravityBlue)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .scale(dot2Scale)
-                                .clip(CircleShape)
-                                .background(AntigravityRed)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .scale(dot3Scale)
-                                .clip(CircleShape)
-                                .background(AccentYellowDark)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .scale(dot4Scale)
-                                .clip(CircleShape)
-                                .background(AntigravityGreen)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
                     if (setupProgress > 0f && setupProgress < 1.0f) {
                         LinearProgressIndicator(
                             progress = { setupProgress },
                             modifier = Modifier
-                                .fillMaxWidth(0.65f)
-                                .height(4.dp)
+                                .width(180.dp)
+                                .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp)),
-                            color = AntigravityBlue,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .width(180.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
                         text = bootStatusText.ifBlank { stringResource(R.string.splash_status_initializing) },

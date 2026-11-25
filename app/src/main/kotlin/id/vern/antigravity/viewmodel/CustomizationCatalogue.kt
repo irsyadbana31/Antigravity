@@ -59,6 +59,14 @@ object CustomizationCatalogue {
                 subPath = "skills/antislop-code"
             ),
             SkillCatalogueItem(
+                id = "gemini-frontend-design",
+                name = "gemini-frontend-design",
+                description = "Design and build polished websites and web apps tailored to the brief. Covers layout, color, typography, custom imagery, and motion.",
+                category = "UI & Visual",
+                repoUrl = "https://github.com/google-gemini/demolab.git",
+                subPath = "skills/gemini-frontend-design"
+            ),
+            SkillCatalogueItem(
                 id = "rea-argonaut",
                 name = "rea-argonaut",
                 description = "Zero-G Reverse Engineering Anything & Verified Rust Reconstruction for Gemini 4 Argon and Google Antigravity 2.0.",
