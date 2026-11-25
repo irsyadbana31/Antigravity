@@ -53,10 +53,10 @@ object PermissionConfigService {
         "mcp(*)"
     )
 
-    private fun isDeprecatedGrant(grantStr: String): Boolean =
+    internal fun isDeprecatedGrant(grantStr: String): Boolean =
         grantStr.trim().startsWith("unsandboxed(", ignoreCase = true)
 
-    private fun isDeprecatedAction(action: String): Boolean =
+    internal fun isDeprecatedAction(action: String): Boolean =
         action.trim().equals("unsandboxed", ignoreCase = true)
 
     private fun getCandidateFiles(context: Context): List<File> {
@@ -86,6 +86,12 @@ object PermissionConfigService {
     }
 
     fun syncSettingsJsonFiles(context: Context, state: PermissionGrantsState = PermissionGrantsState()) {
+        for (settingsFile in getCandidateSettingsFiles(context)) {
+            syncSettingsFile(settingsFile, state)
+        }
+    }
+
+    internal fun syncSettingsFile(settingsFile: File, state: PermissionGrantsState = PermissionGrantsState()): Boolean {
         val allowSet = linkedSetOf<String>()
         allowSet.addAll(DEFAULT_HEADLESS_ALLOW_GRANTS)
         val askSet = linkedSetOf<String>()
@@ -102,60 +108,63 @@ object PermissionConfigService {
             }
         }
 
-        for (settingsFile in getCandidateSettingsFiles(context)) {
-            try {
-                settingsFile.parentFile?.mkdirs()
-                val existingRaw = if (settingsFile.exists() && settingsFile.canRead()) {
-                    settingsFile.readText(Charsets.UTF_8)
-                } else {
-                    null
-                }
-                val root = if (existingRaw != null) {
-                    val text = existingRaw.trim()
-                    if (text.startsWith("{")) JSONObject(text) else JSONObject()
-                } else {
-                    JSONObject()
-                }
+        return try {
+            settingsFile.parentFile?.mkdirs()
+            val existingRaw = if (settingsFile.exists() && settingsFile.canRead()) {
+                settingsFile.readText(Charsets.UTF_8)
+            } else {
+                null
+            }
+            val root = if (existingRaw != null) {
+                val text = existingRaw.trim()
+                if (text.startsWith("{")) JSONObject(text) else JSONObject()
+            } else {
+                JSONObject()
+            }
 
-                val existingPerms = root.optJSONObject("permissions")
-                if (existingPerms != null) {
-                    val existingAllow = existingPerms.optJSONArray("allow")
-                    if (existingAllow != null) {
-                        for (i in 0 until existingAllow.length()) {
-                            val item = existingAllow.optString(i, "").trim()
-                            if (item.isNotBlank() && !isDeprecatedGrant(item)) allowSet.add(item)
-                        }
+            val existingPerms = root.optJSONObject("permissions")
+            if (existingPerms != null) {
+                val existingAllow = existingPerms.optJSONArray("allow")
+                if (existingAllow != null) {
+                    for (i in 0 until existingAllow.length()) {
+                        val item = existingAllow.optString(i, "").trim()
+                        if (item.isNotBlank() && !isDeprecatedGrant(item)) allowSet.add(item)
                     }
                 }
+            }
 
-                val allowArr = JSONArray()
-                allowSet.forEach { allowArr.put(it) }
-                val askArr = JSONArray()
-                askSet.forEach { askArr.put(it) }
-                val denyArr = JSONArray()
-                denySet.forEach { denyArr.put(it) }
+            val allowArr = JSONArray()
+            allowSet.forEach { allowArr.put(it) }
+            val askArr = JSONArray()
+            askSet.forEach { askArr.put(it) }
+            val denyArr = JSONArray()
+            denySet.forEach { denyArr.put(it) }
 
-                val permsObj = JSONObject().apply {
-                    put("allow", allowArr)
-                    if (askArr.length() > 0) put("ask", askArr)
-                    if (denyArr.length() > 0) put("deny", denyArr)
-                }
-                root.put("permissions", permsObj)
+            val permsObj = JSONObject().apply {
+                put("allow", allowArr)
+                if (askArr.length() > 0) put("ask", askArr)
+                if (denyArr.length() > 0) put("deny", denyArr)
+            }
+            root.put("permissions", permsObj)
 
-                val userSettings = root.optJSONObject("userSettings") ?: JSONObject().also { root.put("userSettings", it) }
-                userSettings.put("autoExecutionPolicy", state.autoExecutionPolicy)
-                userSettings.put("enableTerminalSandbox", false)
-                userSettings.put("nonWorkspaceFileAccessPolicy", state.nonWorkspaceFileAccessPolicy)
-                userSettings.put("planReviewPolicy", state.planReviewPolicy)
-                userSettings.put("securityPreset", state.securityPreset)
+            val userSettings = root.optJSONObject("userSettings") ?: JSONObject().also { root.put("userSettings", it) }
+            userSettings.put("autoExecutionPolicy", state.autoExecutionPolicy)
+            userSettings.put("enableTerminalSandbox", false)
+            userSettings.put("nonWorkspaceFileAccessPolicy", state.nonWorkspaceFileAccessPolicy)
+            userSettings.put("planReviewPolicy", state.planReviewPolicy)
+            userSettings.put("securityPreset", state.securityPreset)
 
-                val newContent = root.toString(2)
-                if (existingRaw != newContent) {
-                    settingsFile.writeText(newContent, Charsets.UTF_8)
-                    settingsFile.setReadable(true, false)
-                    settingsFile.setWritable(true, false)
-                }
-            } catch (e: Exception) {}
+            val newContent = root.toString(2)
+            if (existingRaw != newContent) {
+                settingsFile.writeText(newContent, Charsets.UTF_8)
+                settingsFile.setReadable(true, false)
+                settingsFile.setWritable(true, false)
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 

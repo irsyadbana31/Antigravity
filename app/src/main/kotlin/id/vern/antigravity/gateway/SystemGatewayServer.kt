@@ -57,6 +57,38 @@ class SystemGatewayServer(
 
         const val CHANNEL_TASKS = "agy_tasks"
         const val CHANNEL_ALERTS = "agy_alerts"
+
+        internal fun normalizeCommandEndpoint(rawPath: String): String {
+            val cleanPath = rawPath.substringBefore("?").trimEnd('/').ifEmpty { "/" }
+            return cleanPath
+                .removePrefix("/gateway/")
+                .removePrefix("/")
+        }
+
+        internal fun resolveExecCommand(json: JSONObject): String =
+            json.optString("cmd", "").ifBlank { json.optString("command", "") }.trim()
+
+        internal fun buildExecEnvironment(
+            filesPath: String,
+            homePath: String,
+            tmpPath: String,
+            packageName: String,
+            useRish: Boolean
+        ): Map<String, String> {
+            val map = linkedMapOf(
+                "HOME" to homePath,
+                "PREFIX" to "$filesPath/usr",
+                "TMPDIR" to tmpPath,
+                "TERM" to "xterm-256color",
+                "PATH" to "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin",
+                "AGY_APPLICATION_ID" to packageName,
+                "RISH_APPLICATION_ID" to packageName
+            )
+            if (!useRish) {
+                map["LD_LIBRARY_PATH"] = "$filesPath/usr/lib:/system/lib64"
+            }
+            return map
+        }
     }
 
     private data class CommandRecord(
@@ -360,9 +392,7 @@ class SystemGatewayServer(
 
         // Direct endpoint compatibility (e.g. /toast, /exec, /notify, /vibrate, /wakelock, /system_info)
         // and dual-route /gateway/<command> support (e.g. /gateway/exec, /gateway/notify, /gateway/toast)
-        val endpoint = cleanPath
-            .removePrefix("/gateway/")
-            .removePrefix("/")
+        val endpoint = normalizeCommandEndpoint(cleanPath)
         val json = parseJsonBody(body)
         if (endpoint.isEmpty()) {
             return JSONObject()
@@ -563,7 +593,7 @@ class SystemGatewayServer(
     }
 
     private fun handleExec(json: JSONObject): JSONObject {
-        val cmd = json.optString("cmd", "").ifBlank { json.optString("command", "") }.trim()
+        val cmd = resolveExecCommand(json)
         if (cmd.isEmpty()) {
             return JSONObject().put("ok", false).put("error", "empty command")
         }
@@ -606,19 +636,19 @@ class SystemGatewayServer(
             val filesPath = context.filesDir.absolutePath
             val tmpDir = File(context.filesDir, "tmp").apply { mkdirs() }
             val env = pb.environment()
-            env["HOME"] = homeDir.absolutePath
-            env["PREFIX"] = "$filesPath/usr"
-            env["TMPDIR"] = tmpDir.absolutePath
-            env["TERM"] = "xterm-256color"
-            env["PATH"] = "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin"
-            env["AGY_APPLICATION_ID"] = context.packageName
-            env["RISH_APPLICATION_ID"] = context.packageName
             env.remove("LD_PRELOAD")
             if (useRish) {
                 env.remove("LD_LIBRARY_PATH")
-            } else {
-                env["LD_LIBRARY_PATH"] = "$filesPath/usr/lib:/system/lib64"
             }
+            env.putAll(
+                buildExecEnvironment(
+                    filesPath = filesPath,
+                    homePath = homeDir.absolutePath,
+                    tmpPath = tmpDir.absolutePath,
+                    packageName = context.packageName,
+                    useRish = useRish
+                )
+            )
 
             val proc = pb.start()
             val outThread = Thread({ drainBoundedStream(proc.inputStream, stdoutBuf) }, "GatewayExecOut")

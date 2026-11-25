@@ -13,6 +13,8 @@ import id.vern.antigravity.data.UserQuotaSummary
 import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.oauth.OAuthManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,6 +45,47 @@ object CloudCodeQuotaService {
     private const val QUOTA_PATH = "/v1internal:retrieveUserQuotaSummary"
     private const val MODELS_PATH = "/v1internal:fetchAvailableModels"
     private const val TIER_PATH = "/v1internal:loadCodeAssist"
+    internal const val TIER_CACHE_TTL_MS = 5L * 60L * 1000L // 5 minutes
+
+    private val tierCacheLock = Any()
+    private val tierFetchMutex = Mutex()
+    private var cachedTierEmail: String? = null
+    private var cachedTierValue: CodeAssistTier? = null
+    private var cachedTierAtMs: Long = 0L
+
+    fun invalidateTierCache() {
+        synchronized(tierCacheLock) {
+            cachedTierEmail = null
+            cachedTierValue = null
+            cachedTierAtMs = 0L
+        }
+    }
+
+    internal fun getCachedTier(email: String, nowMs: Long = System.currentTimeMillis()): CodeAssistTier? {
+        val normEmail = email.trim().lowercase()
+        if (normEmail.isEmpty()) return null
+        return synchronized(tierCacheLock) {
+            val cached = cachedTierValue
+            if (cached != null &&
+                cachedTierEmail == normEmail &&
+                (nowMs - cachedTierAtMs) in 0L..TIER_CACHE_TTL_MS
+            ) {
+                cached
+            } else {
+                null
+            }
+        }
+    }
+
+    internal fun putCachedTier(email: String, tier: CodeAssistTier, nowMs: Long = System.currentTimeMillis()) {
+        val normEmail = email.trim().lowercase()
+        if (normEmail.isEmpty()) return
+        synchronized(tierCacheLock) {
+            cachedTierEmail = normEmail
+            cachedTierValue = tier
+            cachedTierAtMs = nowMs
+        }
+    }
 
     private val cachedSslContext: SSLContext? by lazy {
         try {
@@ -1143,63 +1186,76 @@ object CloudCodeQuotaService {
         null
     }
 
-    suspend fun fetchCodeAssistTier(context: Context): CodeAssistTier? = withContext(Dispatchers.IO) {
-        OAuthManager.refreshTokenIfNeeded(context)
-        val token = OAuthManager.getAccessToken(context) ?: return@withContext null
+    suspend fun fetchCodeAssistTier(context: Context, forceRefresh: Boolean = false): CodeAssistTier? = withContext(Dispatchers.IO) {
+        val initialEmail = OAuthManager.getUserEmail(context)?.trim().orEmpty()
+        if (!forceRefresh && initialEmail.isNotEmpty()) {
+            getCachedTier(initialEmail)?.let { return@withContext it }
+        }
 
-        try {
-            val respStr = makePostRequestWithFallback(TIER_PATH, token) ?: return@withContext null
-            val json = JSONObject(respStr)
+        tierFetchMutex.withLock {
+            val email = OAuthManager.getUserEmail(context)?.trim().orEmpty()
+            if (!forceRefresh && email.isNotEmpty()) {
+                getCachedTier(email)?.let { return@withLock it }
+            }
 
-            var curTier = TierInfo()
-            if (json.has("currentTier")) {
-                val cObj = json.getJSONObject("currentTier")
-                curTier = TierInfo(
-                    id = cObj.optString("id", ""),
-                    name = cObj.optString("name", "Gemini Code Assist"),
-                    description = cObj.optString("description", ""),
-                    upgradeSubscriptionUri = cObj.optString("upgradeSubscriptionUri", ""),
-                    upgradeSubscriptionText = cObj.optString("upgradeSubscriptionText", "")
-                )
-            } else if (json.has("allowedTiers")) {
-                val arr = json.getJSONArray("allowedTiers")
-                if (arr.length() > 0) {
-                    val cObj = arr.getJSONObject(0)
+            OAuthManager.refreshTokenIfNeeded(context)
+            val token = OAuthManager.getAccessToken(context) ?: return@withLock null
+
+            try {
+                val respStr = makePostRequestWithFallback(TIER_PATH, token) ?: return@withLock null
+                val json = JSONObject(respStr)
+
+                var curTier = TierInfo()
+                if (json.has("currentTier")) {
+                    val cObj = json.getJSONObject("currentTier")
                     curTier = TierInfo(
-                        id = cObj.optString("id", "standard-tier"),
+                        id = cObj.optString("id", ""),
                         name = cObj.optString("name", "Gemini Code Assist"),
                         description = cObj.optString("description", ""),
                         upgradeSubscriptionUri = cObj.optString("upgradeSubscriptionUri", ""),
                         upgradeSubscriptionText = cObj.optString("upgradeSubscriptionText", "")
                     )
+                } else if (json.has("allowedTiers")) {
+                    val arr = json.getJSONArray("allowedTiers")
+                    if (arr.length() > 0) {
+                        val cObj = arr.getJSONObject(0)
+                        curTier = TierInfo(
+                            id = cObj.optString("id", "standard-tier"),
+                            name = cObj.optString("name", "Gemini Code Assist"),
+                            description = cObj.optString("description", ""),
+                            upgradeSubscriptionUri = cObj.optString("upgradeSubscriptionUri", ""),
+                            upgradeSubscriptionText = cObj.optString("upgradeSubscriptionText", "")
+                        )
+                    }
                 }
-            }
 
-            var paidTier: TierInfo? = null
-            if (json.has("paidTier")) {
-                val pObj = json.getJSONObject("paidTier")
-                paidTier = TierInfo(
-                    id = pObj.optString("id", ""),
-                    name = pObj.optString("name", "Google AI Pro"),
-                    description = pObj.optString("description", ""),
-                    upgradeSubscriptionUri = pObj.optString("upgradeSubscriptionUri", ""),
-                    upgradeSubscriptionText = pObj.optString("upgradeSubscriptionText", "")
-                )
-            }
+                var paidTier: TierInfo? = null
+                if (json.has("paidTier")) {
+                    val pObj = json.getJSONObject("paidTier")
+                    paidTier = TierInfo(
+                        id = pObj.optString("id", ""),
+                        name = pObj.optString("name", "Google AI Pro"),
+                        description = pObj.optString("description", ""),
+                        upgradeSubscriptionUri = pObj.optString("upgradeSubscriptionUri", ""),
+                        upgradeSubscriptionText = pObj.optString("upgradeSubscriptionText", "")
+                    )
+                }
 
-            val resultTier = CodeAssistTier(currentTier = curTier, paidTier = paidTier)
-            val email = OAuthManager.getUserEmail(context)
-            if (!email.isNullOrBlank()) {
-                id.vern.antigravity.oauth.AccountManager.updateAccountTier(
-                    context,
-                    email,
-                    resultTier.normalizedTierString
-                )
+                val resultTier = CodeAssistTier(currentTier = curTier, paidTier = paidTier)
+                val resolvedEmail = OAuthManager.getUserEmail(context)?.trim().orEmpty()
+                if (resolvedEmail.isNotEmpty()) {
+                    putCachedTier(resolvedEmail, resultTier)
+                    id.vern.antigravity.oauth.AccountManager.updateAccountTier(
+                        context,
+                        resolvedEmail,
+                        resultTier.normalizedTierString
+                    )
+                }
+                resultTier
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching code assist tier: ${e.message}", e)
+                null
             }
-            resultTier
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching code assist tier: ${e.message}", e)
-            null
         }
     }
 }

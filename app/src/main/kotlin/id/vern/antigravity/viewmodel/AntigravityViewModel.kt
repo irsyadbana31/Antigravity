@@ -1065,6 +1065,9 @@ class AntigravityViewModel : ViewModel() {
             mutableBootStatusText.value = "Antigravity ready"
             addLog("Boot", "Antigravity ready")
             mutableIsBooting.value = false
+            val currentWs = workspacePath.value
+            val validWsDir = if (!currentWs.isNullOrBlank()) File(currentWs).takeIf { it.isDirectory } else null
+            id.vern.antigravity.executor.AcpSessionPool.prewarmAsync(context.applicationContext, validWsDir)
             onReady()
         }
     }

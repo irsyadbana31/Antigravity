@@ -111,6 +111,10 @@ android {
         checkReleaseBuilds = false
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -145,5 +149,12 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("testDebugUnitTest")
 }
 

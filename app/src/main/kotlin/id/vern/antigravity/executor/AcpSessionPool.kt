@@ -7,6 +7,7 @@ import id.vern.antigravity.install.LseCompatHelper
 import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.service.PermissionConfigService
+import id.vern.antigravity.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -95,6 +96,11 @@ object AcpSessionPool {
     private var lastCrashTimeMs = 0L
 
     private val permissionsEnsured = AtomicBoolean(false)
+    private val prewarmInProgress = AtomicBoolean(false)
+
+    private val prewarmExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "AcpSessionPool-Prewarm").apply { isDaemon = true }
+    }
 
     private val idleScheduler = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "AcpSessionPool-Reaper").apply { isDaemon = true }
@@ -104,6 +110,84 @@ object AcpSessionPool {
     fun isTurnRunning(): Boolean = turnInProgress
 
     fun isWarmAlive(): Boolean = synchronized(stateLock) { warmSession?.isHealthy() == true }
+
+    /**
+     * Proactively spawns and initializes a warm `agy acp` daemon in the background
+     * after app boot so Turn 1 avoids the cold-start penalty.
+     *
+     * Uses non-blocking `turnLock.tryLock()` so it never delays an incoming user turn,
+     * skips automatically if no OAuth credentials exist or a warm daemon is already healthy,
+     * and schedules the standard idle reaper so background RAM is reclaimed if unused.
+     */
+    fun prewarmAsync(context: Context, workingDir: File? = null) {
+        if (turnInProgress || isWarmAlive()) return
+        if (!prewarmInProgress.compareAndSet(false, true)) return
+
+        val appCtx = context.applicationContext
+        prewarmExecutor.execute {
+            try {
+                if (turnInProgress || isWarmAlive()) return@execute
+
+                val filesDir = appCtx.filesDir
+                val homeDir = File(filesDir, "home").apply { mkdirs() }
+                val targetCwd = if (workingDir != null && workingDir.exists() && workingDir.isDirectory) workingDir else homeDir
+                val addDir = if (workingDir != null && workingDir.exists() && workingDir.isDirectory) workingDir else null
+
+                val engineDir = File(filesDir, "engine")
+                val ldBin = File(engineDir, "glibc/lib/ld-linux-aarch64.so.1")
+                val agyBin = File(engineDir, "bin/agy")
+                if (!ldBin.exists() || !agyBin.exists()) return@execute
+
+                EngineExecutor.healEnvironment(appCtx)
+                try {
+                    if (permissionsEnsured.compareAndSet(false, true)) {
+                        BootstrapInstaller.ensurePermissions(appCtx)
+                    }
+                    OAuthManager.checkAndImportExistingToken(appCtx)
+                    val email = OAuthManager.getUserEmail(appCtx)
+                    if (email.isNullOrBlank() && !OAuthManager.tokenFile(appCtx).exists()) {
+                        return@execute
+                    }
+                    OAuthManager.syncCompanionStateFiles(appCtx)
+                    PermissionConfigService.syncSettingsJsonFiles(appCtx)
+                } catch (_: Exception) {}
+
+                val fingerprint = computeConfigFingerprint(appCtx)
+                if (!turnLock.tryLock()) return@execute
+                try {
+                    val alreadyHealthy = synchronized(stateLock) {
+                        val existing = warmSession
+                        existing != null &&
+                            existing.isHealthy() &&
+                            existing.workingDirPath == targetCwd.absolutePath &&
+                            existing.addDirPath == addDir?.absolutePath &&
+                            existing.configFingerprint == fingerprint
+                    }
+                    if (alreadyHealthy) return@execute
+
+                    val t0 = System.currentTimeMillis()
+                    val spawned = spawnAndInitialize(appCtx, targetCwd, addDir, fingerprint) { _, _ -> }
+                    if (spawned != null) {
+                        val elapsedMs = System.currentTimeMillis() - t0
+                        val oldToDestroy = synchronized(stateLock) {
+                            val prev = warmSession
+                            warmSession = spawned
+                            scheduleIdleReapLocked()
+                            prev
+                        }
+                        oldToDestroy?.destroyQuietly()
+                        AppLogger.d(TAG, "Pre-warmed ACP daemon in ${elapsedMs}ms (cwd=${targetCwd.absolutePath})")
+                    }
+                } finally {
+                    turnLock.unlock()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Background ACP prewarm skipped: ${e.message}")
+            } finally {
+                prewarmInProgress.set(false)
+            }
+        }
+    }
 
     fun stopActiveTurn() {
         stopRequested = true
@@ -161,7 +245,7 @@ object AcpSessionPool {
         }, IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 
-    private fun hashFileContentOrStat(file: File, maxContentBytes: Long = 512L * 1024L): Long {
+    internal fun hashFileContentOrStat(file: File, maxContentBytes: Long = 512L * 1024L): Long {
         if (!file.exists() || !file.isFile) return 0L
         val len = file.length()
         if (len <= maxContentBytes && file.canRead()) {

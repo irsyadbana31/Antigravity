@@ -191,21 +191,33 @@ object AccountManager {
                 name = name?.takeIf { it.isNotBlank() } ?: item.name,
                 picture = picture?.takeIf { it.isNotBlank() } ?: item.picture
             )
-            current[index] = updated
-            persist(context, getActiveAccountId(context), current)
+            if (updated != item) {
+                current[index] = updated
+                persist(context, getActiveAccountId(context), current)
+            }
         }
     }
 
-    fun updateAccountTier(context: Context, email: String, tier: String) = synchronized(lock) {
-        val current = getAccounts(context).toMutableList()
-        val index = current.indexOfFirst { it.email.equals(email, ignoreCase = true) }
-        if (index >= 0) {
-            val item = current[index]
-            val updated = item.copy(tier = tier.uppercase())
-            current[index] = updated
-            persist(context, getActiveAccountId(context), current)
-            AppLogger.d("AccountManager", "Updated tier for ${item.email}: ${tier.uppercase()}")
+    internal fun updateTierInList(accounts: MutableList<StoredAccount>, email: String, tier: String): Boolean {
+        val normalizedTier = tier.trim().uppercase().ifEmpty { "FREE" }
+        val index = accounts.indexOfFirst { it.email.equals(email, ignoreCase = true) }
+        if (index < 0) return false
+        val item = accounts[index]
+        if (item.tier.equals(normalizedTier, ignoreCase = true)) {
+            return false
         }
+        accounts[index] = item.copy(tier = normalizedTier)
+        return true
+    }
+
+    fun updateAccountTier(context: Context, email: String, tier: String): Boolean = synchronized(lock) {
+        val current = getAccounts(context).toMutableList()
+        if (!updateTierInList(current, email, tier)) {
+            return@synchronized false
+        }
+        persist(context, getActiveAccountId(context), current)
+        AppLogger.d("AccountManager", "Updated tier for $email: ${tier.trim().uppercase()}")
+        true
     }
 
     fun switchAccount(context: Context, accountId: String): Boolean = synchronized(lock) {
@@ -227,6 +239,7 @@ object AccountManager {
             .apply()
 
         AppLogger.d("AccountManager", "Switched active account to: ${target.email}")
+        id.vern.antigravity.service.CloudCodeQuotaService.invalidateTierCache()
         id.vern.antigravity.executor.AcpSessionPool.invalidate("account_switch")
         true
     }
@@ -260,6 +273,7 @@ object AccountManager {
         }
 
         AppLogger.d("AccountManager", "Removed account: ${removed.email}")
+        id.vern.antigravity.service.CloudCodeQuotaService.invalidateTierCache()
         true
     }
 
