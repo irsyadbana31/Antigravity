@@ -281,6 +281,7 @@ object BootstrapInstaller {
         val (stream, zipOwner) = openAssetStream(context, ASSET_GLIBC, emptyList())
         try {
             extractZipStream(stream, targetDir)
+            LseCompatHelper.deployLseCompat(context, targetDir)
             patchGlibcResolvConf(context, targetDir)
         } finally {
             try { stream.close() } catch (e: Exception) {}
@@ -473,6 +474,7 @@ object BootstrapInstaller {
         }
 
         val etcPkg = File(prefix, "etc/pkg").apply { mkdirs() }
+        LseCompatHelper.deployLseCompat(context, engine)
         val repoConf = File(etcPkg, "repo.conf")
         if (!repoConf.exists() || repoConf.length() == 0L) {
             try {
@@ -591,6 +593,10 @@ object BootstrapInstaller {
             export GIT_ATTR_NOSYSTEM=1
             export GIT_TERMINAL_PROMPT=0
             export ANTIGRAVITY_APP_DATA_DIR="${filesDir.absolutePath}/home/.gemini/antigravity-cli"
+            LSE_COMPAT="${libDir.absolutePath}/${LseCompatHelper.LIB_FILENAME}"
+            if [ -f "${'$'}LSE_COMPAT" ] && ! grep -qw atomics /proc/cpuinfo 2>/dev/null; then
+                exec "${ldBin.absolutePath}" --library-path "$libraryPath" --preload "${'$'}LSE_COMPAT" "${agyBin.absolutePath}" "${'$'}@"
+            fi
             exec "${ldBin.absolutePath}" --library-path "$libraryPath" "${agyBin.absolutePath}" "${'$'}@"
         """.trimIndent() + "\n"
 

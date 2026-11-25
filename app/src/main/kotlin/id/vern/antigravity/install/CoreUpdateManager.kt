@@ -44,7 +44,14 @@ object CoreUpdateManager {
                 val libPaths = listOf(libDir.absolutePath, prefixLib.absolutePath)
                     .filter { File(it).exists() }
                     .joinToString(":")
-                val pb = ProcessBuilder(ldBin.absolutePath, "--library-path", libPaths, targetBin.absolutePath, "--version")
+                val cmd = LseCompatHelper.buildGlibcLoaderCommand(
+                    ldBin = ldBin,
+                    libraryPaths = libPaths,
+                    glibcLibDir = libDir,
+                    targetBin = targetBin,
+                    args = listOf("--version")
+                )
+                val pb = ProcessBuilder(cmd)
                 pb.environment().remove("LD_PRELOAD")
                 val proc = pb.start()
                 val out = proc.inputStream.bufferedReader().readText().trim()
@@ -233,7 +240,14 @@ object CoreUpdateManager {
             val libPaths = listOf(libDir.absolutePath, prefixLib.absolutePath)
                 .filter { File(it).exists() }
                 .joinToString(":")
-            val pb = ProcessBuilder(ldBin.absolutePath, "--library-path", libPaths, agyBin.absolutePath, "--version")
+            val smokeCmd = LseCompatHelper.buildGlibcLoaderCommand(
+                ldBin = ldBin,
+                libraryPaths = libPaths,
+                glibcLibDir = libDir,
+                targetBin = agyBin,
+                args = listOf("--version")
+            )
+            val pb = ProcessBuilder(smokeCmd)
             pb.environment().remove("LD_PRELOAD")
             val proc = pb.start()
             val verifyOut = proc.inputStream.bufferedReader().readText().trim()

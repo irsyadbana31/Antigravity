@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import id.vern.antigravity.R
+import id.vern.antigravity.executor.AcpSessionPool
 import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +63,8 @@ class CoreServerService : Service() {
         ForegroundNotification.start(this, getString(R.string.notification_engine_active))
         wakeLockHolder.acquire(this, 15_000L)
 
+        OrphanProcessCleaner.killOrphanCoreProcesses(this)
+
         gatewayServer = SystemGatewayServer(this, 45161, wakeLockHolder)
         gatewayServer?.start()
 
@@ -96,9 +99,10 @@ class CoreServerService : Service() {
         Log.i(TAG, "Destroying CoreServerService...")
         dismissNotification()
         serviceScope.cancel()
+        AcpSessionPool.invalidate("service_destroy")
         stopBackgroundDaemon()
         gatewayServer?.stop()
-        wakeLockHolder.release()
+        wakeLockHolder.releaseAll()
         AppLogger.d("Engine", "CoreServerService stopped")
         super.onDestroy()
     }

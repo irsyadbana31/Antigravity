@@ -3,6 +3,7 @@ package id.vern.antigravity.executor
 import android.content.Context
 import android.system.Os
 import id.vern.antigravity.install.BootstrapInstaller
+import id.vern.antigravity.install.LseCompatHelper
 import id.vern.antigravity.oauth.OAuthManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -299,12 +300,13 @@ object EngineExecutor {
                     .filter { File(it).exists() }
                     .joinToString(":")
 
-                val cmdList = mutableListOf(
-                    ldBin.absolutePath,
-                    "--library-path",
-                    libraryPaths,
-                    agyBin.absolutePath
-                ).apply { addAll(args) }
+                val cmdList = LseCompatHelper.buildGlibcLoaderCommand(
+                    ldBin = ldBin,
+                    libraryPaths = libraryPaths,
+                    glibcLibDir = libDir,
+                    targetBin = agyBin,
+                    args = args
+                )
 
                 val pb = ProcessBuilder(cmdList)
                 pb.directory(targetCwd)
@@ -704,15 +706,17 @@ object EngineExecutor {
             .filter { File(it).exists() }
             .joinToString(":")
 
-        val cmdList = mutableListOf(
-            ldBin.absolutePath,
-            "--library-path",
-            libraryPaths,
-            agyBin.absolutePath,
-            "--print",
-            "--output-format", "text",
-            "--disable-slash-commands",
-            "--effort", "low"
+        val cmdList = LseCompatHelper.buildGlibcLoaderCommand(
+            ldBin = ldBin,
+            libraryPaths = libraryPaths,
+            glibcLibDir = libDir,
+            targetBin = agyBin,
+            args = listOf(
+                "--print",
+                "--output-format", "text",
+                "--disable-slash-commands",
+                "--effort", "low"
+            )
         )
         if (!cliModelId.isNullOrBlank()) {
             cmdList.add("--model")
@@ -815,14 +819,16 @@ object EngineExecutor {
             .joinToString(":")
 
         val timeoutSec = ((timeoutMs / 1000L).coerceAtLeast(5L)).toString() + "s"
-        val cmdList = listOf(
-            ldBin.absolutePath,
-            "--library-path",
-            libraryPaths,
-            agyBin.absolutePath,
-            "--output-format", "json",
-            "--print-timeout", timeoutSec,
-            "-p", command
+        val cmdList = LseCompatHelper.buildGlibcLoaderCommand(
+            ldBin = ldBin,
+            libraryPaths = libraryPaths,
+            glibcLibDir = libDir,
+            targetBin = agyBin,
+            args = listOf(
+                "--output-format", "json",
+                "--print-timeout", timeoutSec,
+                "-p", command
+            )
         )
 
         val pb = ProcessBuilder(cmdList)

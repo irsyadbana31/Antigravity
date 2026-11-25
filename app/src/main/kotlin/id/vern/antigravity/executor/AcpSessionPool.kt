@@ -3,6 +3,7 @@ package id.vern.antigravity.executor
 import android.content.Context
 import android.util.Log
 import id.vern.antigravity.install.BootstrapInstaller
+import id.vern.antigravity.install.LseCompatHelper
 import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.service.PermissionConfigService
@@ -226,13 +227,12 @@ object AcpSessionPool {
             .filter { File(it).exists() }
             .joinToString(":")
 
-        val cmdList = mutableListOf(
-            ldBin.absolutePath,
-            "--library-path",
-            libraryPaths,
-            agyBin.absolutePath,
-            "acp",
-            "--dangerously-skip-permissions"
+        val cmdList = LseCompatHelper.buildGlibcLoaderCommand(
+            ldBin = ldBin,
+            libraryPaths = libraryPaths,
+            glibcLibDir = libDir,
+            targetBin = agyBin,
+            args = listOf("acp", "--dangerously-skip-permissions")
         )
         if (addDir != null && addDir.exists() && addDir.isDirectory) {
             cmdList.add("--add-dir")
