@@ -46,13 +46,18 @@ object PermissionConfigService {
     private val GRANT_REGEX = Regex("^([^(]+)\\((.*)\\)$")
     private val DEFAULT_HEADLESS_ALLOW_GRANTS = listOf(
         "command(*)",
-        "unsandboxed(*)",
         "read_file(*)",
         "write_file(*)",
         "read_url(*)",
         "execute_url(*)",
         "mcp(*)"
     )
+
+    private fun isDeprecatedGrant(grantStr: String): Boolean =
+        grantStr.trim().startsWith("unsandboxed(", ignoreCase = true)
+
+    private fun isDeprecatedAction(action: String): Boolean =
+        action.trim().equals("unsandboxed", ignoreCase = true)
 
     private fun getCandidateFiles(context: Context): List<File> {
         val list = mutableListOf<File>()
@@ -71,11 +76,11 @@ object PermissionConfigService {
     }
 
     private fun findPrimaryConfigFile(context: Context): File {
-        val candidates = getCandidateFiles(context)
-        for (f in candidates) {
-            if (f.exists() && f.canRead()) return f
+        val existing = getCandidateFiles(context).filter { it.exists() && it.canRead() }
+        if (existing.isNotEmpty()) {
+            return existing.maxBy { it.lastModified() }
         }
-        val defaultFile = candidates.first()
+        val defaultFile = getCandidateFiles(context).first()
         defaultFile.parentFile?.mkdirs()
         return defaultFile
     }
@@ -87,6 +92,7 @@ object PermissionConfigService {
         val denySet = linkedSetOf<String>()
 
         for (rule in state.rules) {
+            if (isDeprecatedAction(rule.action)) continue
             val grantStr = "${rule.action}(${rule.pattern})"
             when (rule.mode.lowercase()) {
                 "allow" -> allowSet.add(grantStr)
@@ -112,7 +118,7 @@ object PermissionConfigService {
                     if (existingAllow != null) {
                         for (i in 0 until existingAllow.length()) {
                             val item = existingAllow.optString(i, "").trim()
-                            if (item.isNotBlank()) allowSet.add(item)
+                            if (item.isNotBlank() && !isDeprecatedGrant(item)) allowSet.add(item)
                         }
                     }
                 }
@@ -179,7 +185,7 @@ object PermissionConfigService {
                         if (match != null) {
                             val action = match.groupValues[1].trim()
                             val pattern = match.groupValues[2].trim()
-                            if (action.isNotBlank() && pattern.isNotBlank()) {
+                            if (action.isNotBlank() && pattern.isNotBlank() && !isDeprecatedAction(action)) {
                                 rules.add(PermissionRule(action, pattern, mode))
                             }
                         }
@@ -235,6 +241,7 @@ object PermissionConfigService {
             val denyArr = JSONArray()
 
             for (rule in state.rules) {
+                if (isDeprecatedAction(rule.action)) continue
                 val grantStr = "${rule.action}(${rule.pattern})"
                 when (rule.mode.lowercase()) {
                     "allow" -> allowSet.add(grantStr)

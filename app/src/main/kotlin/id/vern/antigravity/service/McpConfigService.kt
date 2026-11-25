@@ -33,8 +33,9 @@ object McpConfigService {
     }
 
     fun getPrimaryConfigFile(context: Context): File {
-        for (f in getCandidateFiles(context)) {
-            if (f.exists() && f.canWrite()) return f
+        val existing = getCandidateFiles(context).filter { it.exists() && it.canRead() }
+        if (existing.isNotEmpty()) {
+            return existing.maxBy { it.lastModified() }
         }
         val defaultFile = getCandidateFiles(context).first()
         defaultFile.parentFile?.mkdirs()

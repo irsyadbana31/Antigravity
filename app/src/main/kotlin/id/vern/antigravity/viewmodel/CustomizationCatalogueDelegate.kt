@@ -81,15 +81,57 @@ class CustomizationCatalogueDelegate {
 
     fun syncConfigBidirectional(context: Context) {
         try {
-            val directConfig = File(context.filesDir, ".gemini/config")
-            val homeConfig = File(context.filesDir, "home/.gemini/config")
-            if (directConfig.exists() && directConfig.isDirectory) {
-                directConfig.copyRecursively(homeConfig, overwrite = true)
-            }
-            if (homeConfig.exists() && homeConfig.isDirectory) {
-                homeConfig.copyRecursively(directConfig, overwrite = false)
-            }
+            val directConfig = File(context.filesDir, ".gemini/config").apply { mkdirs() }
+            val homeConfig = File(context.filesDir, "home/.gemini/config").apply { mkdirs() }
+            syncDirectoriesNewestWins(directConfig, homeConfig)
         } catch (_: Exception) {}
+    }
+
+    private fun syncDirectoriesNewestWins(dirA: File, dirB: File) {
+        if (!dirA.isDirectory || !dirB.isDirectory) return
+        val relFiles = linkedSetOf<String>()
+
+        fun collectRelativeFiles(root: File) {
+            root.walkTopDown().forEach { f ->
+                if (f.isFile) {
+                    val rel = f.relativeTo(root).path
+                    if (rel.isNotEmpty()) relFiles.add(rel)
+                }
+            }
+        }
+
+        collectRelativeFiles(dirA)
+        collectRelativeFiles(dirB)
+
+        for (rel in relFiles) {
+            val fileA = File(dirA, rel)
+            val fileB = File(dirB, rel)
+            try {
+                when {
+                    fileA.isFile && !fileB.exists() -> copyFilePreservingMeta(fileA, fileB)
+                    fileB.isFile && !fileA.exists() -> copyFilePreservingMeta(fileB, fileA)
+                    fileA.isFile && fileB.isFile -> {
+                        val modA = fileA.lastModified()
+                        val modB = fileB.lastModified()
+                        when {
+                            modA > modB -> copyFilePreservingMeta(fileA, fileB)
+                            modB > modA -> copyFilePreservingMeta(fileB, fileA)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun copyFilePreservingMeta(src: File, dst: File) {
+        dst.parentFile?.mkdirs()
+        src.copyTo(dst, overwrite = true)
+        dst.setReadable(true, false)
+        dst.setWritable(true, false)
+        val mtime = src.lastModified()
+        if (mtime > 0L) {
+            dst.setLastModified(mtime)
+        }
     }
 
     fun syncConfigToRoot(context: Context) {
