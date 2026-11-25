@@ -46,6 +46,33 @@ class CoreServerService : Service() {
             }
             context.startService(intent)
         }
+
+        internal fun buildDaemonEnvironment(
+            filesPath: String,
+            homePath: String,
+            tmpPath: String,
+            packageName: String,
+            gatewayPort: Int? = null,
+            gatewayToken: String? = null
+        ): Map<String, String> {
+            val map = linkedMapOf(
+                "PATH" to "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin",
+                "LD_LIBRARY_PATH" to "$filesPath/usr/lib:/system/lib64",
+                "HOME" to homePath,
+                "PREFIX" to "$filesPath/usr",
+                "TMPDIR" to tmpPath,
+                "AGY_APPLICATION_ID" to packageName,
+                "APPLICATION_ID" to packageName,
+                "RISH_APPLICATION_ID" to packageName
+            )
+            if (gatewayPort != null && gatewayPort in 1024..65535) {
+                map["AGY_GATEWAY_PORT"] = gatewayPort.toString()
+            }
+            if (!gatewayToken.isNullOrBlank()) {
+                map["AGY_GATEWAY_TOKEN"] = gatewayToken
+            }
+            return map
+        }
     }
 
     private val binder = LocalBinder()
@@ -122,6 +149,30 @@ class CoreServerService : Service() {
         }
     }
 
+    private fun createDaemonProcessBuilder(
+        daemonBin: File,
+        command: String,
+        includeGatewayCredentials: Boolean
+    ): ProcessBuilder {
+        val homeDir = File(filesDir, "home").apply { mkdirs() }
+        val tmpDir = File(filesDir, "tmp").apply { mkdirs() }
+        return ProcessBuilder(daemonBin.absolutePath, command).apply {
+            directory(homeDir)
+            redirectErrorStream(true)
+            environment().remove("LD_PRELOAD")
+            environment().putAll(
+                buildDaemonEnvironment(
+                    filesPath = filesDir.absolutePath,
+                    homePath = homeDir.absolutePath,
+                    tmpPath = tmpDir.absolutePath,
+                    packageName = packageName,
+                    gatewayPort = if (includeGatewayCredentials) SystemGatewayServer.readActivePort(filesDir) else null,
+                    gatewayToken = if (includeGatewayCredentials) SystemGatewayServer.ensureGatewayToken(filesDir) else null
+                )
+            )
+        }
+    }
+
     private fun startBackgroundDaemon() {
         serviceScope.launch {
             try {
@@ -129,17 +180,21 @@ class CoreServerService : Service() {
                 val daemonBin = File(filesDir, "usr/bin/agy-daemon")
                 if (daemonBin.canExecute()) {
                     Log.i(TAG, "Starting autonomous background daemon...")
-                    val homeDir = File(filesDir, "home").apply { mkdirs() }
-                    val pb = ProcessBuilder(daemonBin.absolutePath, "start")
-                    pb.directory(homeDir)
-                    pb.environment()["PATH"] = "${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/engine/bin:/system/bin"
-                    pb.environment()["HOME"] = homeDir.absolutePath
-                    pb.environment()["PREFIX"] = "${filesDir.absolutePath}/usr"
-                    pb.environment()["AGY_APPLICATION_ID"] = packageName
-                    pb.environment()["APPLICATION_ID"] = packageName
-                    pb.environment()["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
-                    pb.environment()["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
-                    pb.start()
+                    val proc = createDaemonProcessBuilder(daemonBin, "start", includeGatewayCredentials = true).start()
+                    val exited = proc.waitFor(5, TimeUnit.SECONDS)
+                    if (exited && proc.exitValue() == 0) {
+                        runCatching { proc.inputStream.close() }
+                        AppLogger.d("Engine", "Background agy-daemon started")
+                    } else if (exited) {
+                        val errText = runCatching {
+                            proc.inputStream.bufferedReader().use { it.readText() }.trim()
+                        }.getOrDefault("")
+                        Log.w(TAG, "agy-daemon start exited ${proc.exitValue()}: $errText")
+                        AppLogger.e("Engine", "agy-daemon start failed (exit ${proc.exitValue()}): ${errText.take(200)}")
+                    } else {
+                        runCatching { proc.inputStream.close() }
+                        Log.w(TAG, "agy-daemon start did not exit within 5s")
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to launch agy-daemon: ${e.message}")
@@ -152,14 +207,13 @@ class CoreServerService : Service() {
             val daemonBin = File(filesDir, "usr/bin/agy-daemon")
             if (daemonBin.canExecute()) {
                 Log.i(TAG, "Stopping background daemon...")
-                val homeDir = File(filesDir, "home").apply { mkdirs() }
-                val pb = ProcessBuilder(daemonBin.absolutePath, "stop")
-                pb.directory(homeDir)
-                pb.environment()["PATH"] = "${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/engine/bin:/system/bin"
-                pb.environment()["HOME"] = homeDir.absolutePath
-                val p = pb.start()
-                if (!p.waitFor(1500, TimeUnit.MILLISECONDS)) {
-                    p.destroyForcibly()
+                val p = createDaemonProcessBuilder(daemonBin, "stop", includeGatewayCredentials = false).start()
+                try {
+                    if (!p.waitFor(1500, TimeUnit.MILLISECONDS)) {
+                        p.destroyForcibly()
+                    }
+                } finally {
+                    runCatching { p.inputStream.close() }
                 }
             }
         } catch (e: Exception) {
