@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import id.vern.antigravity.R
 import id.vern.antigravity.executor.EngineExecutor
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -109,7 +110,10 @@ object TerminalSessionManager {
     }
 
     private val ANSI_REGEX = Regex("(?:\u001B\\[[0-?]*[ -/]*[@-~]|\u001B\\][^\u0007\u001B]*(?:\u0007|\u001B\\\\)|\u001B[@-Z\\\\-_]|\r)")
-    fun cleanAnsi(text: String): String = text.replace(ANSI_REGEX, "").trimEnd('\r')
+    fun cleanAnsi(text: String): String {
+        if (text.indexOf('\u001B') == -1 && text.indexOf('\r') == -1) return text
+        return RustTurboBridge.stripAnsi(text) ?: text.replace(ANSI_REGEX, "").trimEnd('\r')
+    }
 
     fun appendLine(text: String, isError: Boolean, isUpdate: Boolean) {
         val clean = cleanAnsi(text)

@@ -6,6 +6,11 @@ import id.vern.antigravity.ui.components.MarkdownElement
 object RustTurboBridge {
     private const val TAG = "RustTurboBridge"
 
+    const val PATCH_BIT_FACCESSAT2 = 1 shl 0
+    const val PATCH_BIT_FCHMODAT2 = 1 shl 1
+    const val PATCH_BIT_PTY_SHELL = 1 shl 2
+    const val PATCH_BIT_RESOLV = 1 shl 3
+
     val isLoaded: Boolean = try {
         System.loadLibrary("antigravity_turbo")
         true
@@ -19,6 +24,15 @@ object RustTurboBridge {
 
     @JvmStatic
     private external fun nativeQuickTailFile(path: String, maxBytes: Int): String?
+
+    @JvmStatic
+    private external fun nativePatchCoreBinary(path: String): Int
+
+    @JvmStatic
+    private external fun nativeStripAnsi(input: String): String?
+
+    @JvmStatic
+    private external fun nativeParseAcpLine(line: String): String?
 
     @JvmStatic
     private external fun nativeEngineVersion(): String?
@@ -36,6 +50,39 @@ object RustTurboBridge {
         if (!isLoaded) return null
         return try {
             nativeQuickTailFile(path, maxBytes)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Patches the 4 Android/glibc binary fixes in a single SIMD-accelerated pass.
+     * Returns bitmask (>= 0) on success, or null if native lib unavailable / I/O error.
+     */
+    fun patchCoreBinary(path: String): Int? {
+        if (!isLoaded) return null
+        return try {
+            val res = nativePatchCoreBinary(path)
+            if (res >= 0) res else null
+        } catch (t: Throwable) {
+            Log.w(TAG, "nativePatchCoreBinary failed, falling back to Kotlin: ${t.message}")
+            null
+        }
+    }
+
+    fun stripAnsi(input: String): String? {
+        if (!isLoaded) return null
+        return try {
+            nativeStripAnsi(input)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    fun parseAcpLine(line: String): String? {
+        if (!isLoaded) return null
+        return try {
+            nativeParseAcpLine(line)
         } catch (_: Throwable) {
             null
         }

@@ -7,6 +7,7 @@ import id.vern.antigravity.data.AgentStepKind
 import id.vern.antigravity.data.ChatMessage
 import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.MessageStatus
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
@@ -138,7 +139,11 @@ object TranscriptTurnParser {
     fun readTranscriptTurnLines(file: File, maxTailBytes: Long = 512 * 1024L): List<String> {
         return try {
             val length = file.length()
-            val rawLines: List<String> = if (length <= maxTailBytes) {
+            val nativeTail = RustTurboBridge.quickTailFile(file.absolutePath, maxTailBytes.toInt())
+            val rawLines: List<String> = if (nativeTail != null) {
+                val split = nativeTail.lines()
+                if (length > maxTailBytes && split.size > 1) split.subList(1, split.size) else split
+            } else if (length <= maxTailBytes) {
                 file.readLines()
             } else {
                 RandomAccessFile(file, "r").use { raf ->

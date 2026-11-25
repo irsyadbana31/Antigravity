@@ -227,6 +227,7 @@ object AccountManager {
             .apply()
 
         AppLogger.d("AccountManager", "Switched active account to: ${target.email}")
+        id.vern.antigravity.executor.AcpSessionPool.invalidate("account_switch")
         true
     }
 

@@ -2,6 +2,7 @@ package id.vern.antigravity.install
 
 import android.content.Context
 import android.util.Log
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -76,6 +77,27 @@ object CoreBinaryPatcher {
         }
 
         try {
+            val nativeMask = RustTurboBridge.patchCoreBinary(binaryFile.absolutePath)
+            if (nativeMask != null) {
+                if ((nativeMask and RustTurboBridge.PATCH_BIT_FACCESSAT2) != 0) {
+                    Log.i(TAG, "[Rust] Patched faccessat2 -> faccessat in ${binaryFile.name}")
+                }
+                if ((nativeMask and RustTurboBridge.PATCH_BIT_FCHMODAT2) != 0) {
+                    Log.i(TAG, "[Rust] Patched fchmodat2 -> fchmodat in ${binaryFile.name}")
+                }
+                if ((nativeMask and RustTurboBridge.PATCH_BIT_PTY_SHELL) != 0) {
+                    Log.i(TAG, "[Rust] Patched pty shell /bin/bash -> /bin///sh in ${binaryFile.name}")
+                }
+                if ((nativeMask and RustTurboBridge.PATCH_BIT_RESOLV) != 0) {
+                    Log.i(TAG, "[Rust] Patched resolv.conf in ${binaryFile.name}")
+                }
+                success = nativeMask != 0
+                if (success) {
+                    markAsPatched(binaryFile)
+                }
+                return success
+            }
+
             var patchedAny = false
             if (patchInPlace(binaryFile, FACCESSAT2_TARGET, FACCESSAT2_REPL)) {
                 patchedAny = true
