@@ -1,3 +1,4 @@
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -171,7 +172,7 @@ val testRustNative = tasks.register("testRustNative") {
         }
         if (cargoAvailable) {
             val proc = ProcessBuilder("cargo", "test")
-                .directory(java.io.File(rustDirPath))
+                .directory(File(rustDirPath))
                 .inheritIO()
                 .start()
             val code = proc.waitFor()
