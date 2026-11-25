@@ -94,6 +94,8 @@ object AcpSessionPool {
     @Volatile
     private var lastCrashTimeMs = 0L
 
+    private val permissionsEnsured = AtomicBoolean(false)
+
     private val idleScheduler = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "AcpSessionPool-Reaper").apply { isDaemon = true }
     }
@@ -159,6 +161,21 @@ object AcpSessionPool {
         }, IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 
+    private fun hashFileContentOrStat(file: File, maxContentBytes: Long = 512L * 1024L): Long {
+        if (!file.exists() || !file.isFile) return 0L
+        val len = file.length()
+        if (len <= maxContentBytes && file.canRead()) {
+            return try {
+                val crc = java.util.zip.CRC32()
+                crc.update(file.readBytes())
+                crc.value xor (len shl 32)
+            } catch (_: Exception) {
+                file.lastModified() xor (len shl 16)
+            }
+        }
+        return file.lastModified() xor (len shl 16)
+    }
+
     private fun computeConfigFingerprint(context: Context): Long {
         val filesDir = context.filesDir
         val homeDir = File(filesDir, "home")
@@ -167,17 +184,20 @@ object AcpSessionPool {
         val email = prefs.getString(OAuthManager.KEY_USER_EMAIL, "") ?: ""
         hash = 31L * hash + email.hashCode().toLong()
 
-        val trackedFiles = listOf(
+        // Hash content of small config files so mtime-only touches never invalidate a warm daemon
+        val trackedConfigs = listOf(
             File(homeDir, ".gemini/config/mcp_config.json"),
             File(homeDir, ".gemini/config/config.json"),
             File(homeDir, ".gemini/antigravity-cli/settings.json"),
             File(homeDir, ".gemini/antigravity-cli/oauth_creds.json"),
-            File(filesDir, ".gemini/config/mcp_config.json"),
-            File(filesDir, "engine/bin/agy")
+            File(filesDir, ".gemini/config/mcp_config.json")
         )
-        for (f in trackedFiles) {
-            hash = 31L * hash + if (f.exists()) (f.lastModified() xor (f.length() shl 16)) else 0L
+        for (f in trackedConfigs) {
+            hash = 31L * hash + hashFileContentOrStat(f)
         }
+        // For the large agy binary, stat metadata is sufficient and avoids reading 250+ MB
+        val agyBin = File(filesDir, "engine/bin/agy")
+        hash = 31L * hash + if (agyBin.exists()) (agyBin.lastModified() xor (agyBin.length() shl 16)) else 0L
         return hash
     }
 
@@ -412,7 +432,9 @@ object AcpSessionPool {
         }
 
         try {
-            BootstrapInstaller.ensurePermissions(context)
+            if (permissionsEnsured.compareAndSet(false, true)) {
+                BootstrapInstaller.ensurePermissions(context)
+            }
             OAuthManager.checkAndImportExistingToken(context)
             OAuthManager.syncCompanionStateFiles(context)
             PermissionConfigService.syncSettingsJsonFiles(context)

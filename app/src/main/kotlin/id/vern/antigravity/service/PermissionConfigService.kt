@@ -105,8 +105,13 @@ object PermissionConfigService {
         for (settingsFile in getCandidateSettingsFiles(context)) {
             try {
                 settingsFile.parentFile?.mkdirs()
-                val root = if (settingsFile.exists() && settingsFile.canRead()) {
-                    val text = settingsFile.readText(Charsets.UTF_8).trim()
+                val existingRaw = if (settingsFile.exists() && settingsFile.canRead()) {
+                    settingsFile.readText(Charsets.UTF_8)
+                } else {
+                    null
+                }
+                val root = if (existingRaw != null) {
+                    val text = existingRaw.trim()
                     if (text.startsWith("{")) JSONObject(text) else JSONObject()
                 } else {
                     JSONObject()
@@ -144,9 +149,12 @@ object PermissionConfigService {
                 userSettings.put("planReviewPolicy", state.planReviewPolicy)
                 userSettings.put("securityPreset", state.securityPreset)
 
-                settingsFile.writeText(root.toString(2), Charsets.UTF_8)
-                settingsFile.setReadable(true, false)
-                settingsFile.setWritable(true, false)
+                val newContent = root.toString(2)
+                if (existingRaw != newContent) {
+                    settingsFile.writeText(newContent, Charsets.UTF_8)
+                    settingsFile.setReadable(true, false)
+                    settingsFile.setWritable(true, false)
+                }
             } catch (e: Exception) {}
         }
     }

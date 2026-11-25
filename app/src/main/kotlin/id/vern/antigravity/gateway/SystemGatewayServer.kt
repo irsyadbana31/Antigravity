@@ -359,7 +359,10 @@ class SystemGatewayServer(
         }
 
         // Direct endpoint compatibility (e.g. /toast, /exec, /notify, /vibrate, /wakelock, /system_info)
-        val endpoint = cleanPath.removePrefix("/")
+        // and dual-route /gateway/<command> support (e.g. /gateway/exec, /gateway/notify, /gateway/toast)
+        val endpoint = cleanPath
+            .removePrefix("/gateway/")
+            .removePrefix("/")
         val json = parseJsonBody(body)
         if (endpoint.isEmpty()) {
             return JSONObject()
@@ -560,7 +563,7 @@ class SystemGatewayServer(
     }
 
     private fun handleExec(json: JSONObject): JSONObject {
-        val cmd = json.optString("cmd", "").trim()
+        val cmd = json.optString("cmd", "").ifBlank { json.optString("command", "") }.trim()
         if (cmd.isEmpty()) {
             return JSONObject().put("ok", false).put("error", "empty command")
         }
@@ -601,15 +604,20 @@ class SystemGatewayServer(
             }
 
             val filesPath = context.filesDir.absolutePath
+            val tmpDir = File(context.filesDir, "tmp").apply { mkdirs() }
             val env = pb.environment()
             env["HOME"] = homeDir.absolutePath
             env["PREFIX"] = "$filesPath/usr"
+            env["TMPDIR"] = tmpDir.absolutePath
+            env["TERM"] = "xterm-256color"
             env["PATH"] = "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin"
             env["AGY_APPLICATION_ID"] = context.packageName
             env["RISH_APPLICATION_ID"] = context.packageName
             env.remove("LD_PRELOAD")
             if (useRish) {
                 env.remove("LD_LIBRARY_PATH")
+            } else {
+                env["LD_LIBRARY_PATH"] = "$filesPath/usr/lib:/system/lib64"
             }
 
             val proc = pb.start()
