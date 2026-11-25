@@ -46,6 +46,8 @@ class SystemGatewayServer(
     private val port: Int = 45161,
     private val wakeLockHolder: WakeLockHolder? = null
 ) {
+    internal enum class ExecMode { SHELL, RISH }
+
     companion object {
         private const val TAG = "SystemGateway"
         private const val SOCKET_TIMEOUT_MS = 10_000
@@ -64,8 +66,6 @@ class SystemGatewayServer(
                 .removePrefix("/gateway/")
                 .removePrefix("/")
         }
-
-        internal enum class ExecMode { SHELL, RISH }
 
         internal fun resolveExecCommand(json: JSONObject): String =
             json.optString("cmd", "").ifBlank { json.optString("command", "") }.trim()
