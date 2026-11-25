@@ -18,6 +18,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.system.Os
 import android.util.Log
 import android.widget.Toast
 import id.vern.antigravity.install.LseCompatHelper
@@ -35,6 +36,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ExecutorService
@@ -56,9 +59,115 @@ class SystemGatewayServer(
         private const val MAX_BODY_BYTES = 4 * 1024 * 1024 // 4 MiB
         private const val MAX_EXEC_OUTPUT_BYTES = 512 * 1024 // 512 KiB per stream
         private const val MAX_COMMAND_HISTORY = 30
+        private const val TOKEN_BYTES = 32
+        private val HEX_TOKEN_REGEX = Regex("^[0-9a-f]{64}$")
+        private val ALLOWED_HOSTS = setOf("127.0.0.1", "localhost", "[::1]")
+
+        private val tokenLock = Any()
+        @Volatile
+        private var cachedToken: String? = null
+        @Volatile
+        private var cachedTokenDir: String? = null
 
         const val CHANNEL_TASKS = "agy_tasks"
         const val CHANNEL_ALERTS = "agy_alerts"
+
+        fun readActivePort(filesDir: File, defaultPort: Int = 45161): Int {
+            return try {
+                val portFile = File(filesDir, "logs/gateway.port")
+                val parsed = if (portFile.isFile) portFile.readText(Charsets.UTF_8).trim().toIntOrNull() else null
+                if (parsed != null && parsed in 1024..65535) parsed else defaultPort
+            } catch (_: Exception) {
+                defaultPort
+            }
+        }
+
+        fun ensureGatewayToken(filesDir: File): String {
+            val dirKey = filesDir.absolutePath
+            synchronized(tokenLock) {
+                val tokenFile = File(filesDir, "logs/gateway.token")
+                val inMem = cachedToken
+                if (inMem != null && cachedTokenDir == dirKey && tokenFile.isFile) {
+                    return inMem
+                }
+
+                if (tokenFile.isFile) {
+                    try {
+                        val existing = tokenFile.readText(Charsets.UTF_8).trim().lowercase()
+                        if (HEX_TOKEN_REGEX.matches(existing)) {
+                            enforceOwnerOnlyPermissions(tokenFile)
+                            cachedToken = existing
+                            cachedTokenDir = dirKey
+                            return existing
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                val bytes = ByteArray(TOKEN_BYTES)
+                SecureRandom().nextBytes(bytes)
+                val generated = bytes.joinToString("") { "%02x".format(it) }
+
+                try {
+                    tokenFile.parentFile?.mkdirs()
+                    val tmpFile = File(tokenFile.parentFile, "gateway.token.tmp")
+                    tmpFile.writeText("$generated\n", Charsets.UTF_8)
+                    enforceOwnerOnlyPermissions(tmpFile)
+                    if (!tmpFile.renameTo(tokenFile)) {
+                        tokenFile.writeText("$generated\n", Charsets.UTF_8)
+                        tmpFile.delete()
+                    }
+                    enforceOwnerOnlyPermissions(tokenFile)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed persisting gateway token: ${e.message}")
+                }
+
+                cachedToken = generated
+                cachedTokenDir = dirKey
+                return generated
+            }
+        }
+
+        private fun enforceOwnerOnlyPermissions(file: File) {
+            try {
+                file.setReadable(false, false)
+                file.setReadable(true, true)
+                file.setWritable(false, false)
+                file.setWritable(true, true)
+                Os.chmod(file.absolutePath, 384) // 0600
+            } catch (_: Throwable) {}
+        }
+
+        internal fun validateHostAndOriginHeaders(headers: Map<String, String>): String? {
+            if (headers.containsKey("origin") || headers.keys.any { it.startsWith("sec-fetch-") }) {
+                return "browser origin requests are forbidden"
+            }
+            val rawHost = headers["host"]?.trim().orEmpty()
+            if (rawHost.isNotEmpty()) {
+                val hostOnly = if (rawHost.startsWith("[")) {
+                    val endBracket = rawHost.indexOf(']')
+                    if (endBracket > 0) rawHost.substring(0, endBracket + 1) else rawHost
+                } else {
+                    rawHost.substringBefore(':')
+                }.lowercase()
+                if (hostOnly !in ALLOWED_HOSTS) {
+                    return "invalid Host header"
+                }
+            }
+            return null
+        }
+
+        internal fun isAuthorizedRequest(headers: Map<String, String>, expectedToken: String): Boolean {
+            if (expectedToken.isBlank()) return false
+            val xToken = headers["x-agy-token"]?.trim()?.takeIf { it.isNotEmpty() }
+            val bearer = headers["authorization"]?.trim()?.let { auth ->
+                if (auth.startsWith("Bearer ", ignoreCase = true)) auth.substring(7).trim() else null
+            }?.takeIf { it.isNotEmpty() }
+            val candidate = xToken ?: bearer ?: return false
+            return MessageDigest.isEqual(
+                candidate.toByteArray(Charsets.UTF_8),
+                expectedToken.toByteArray(Charsets.UTF_8)
+            )
+        }
 
         internal fun normalizeCommandEndpoint(rawPath: String): String {
             val cleanPath = rawPath.substringBefore("?").trimEnd('/').ifEmpty { "/" }
@@ -87,7 +196,9 @@ class SystemGatewayServer(
             homePath: String,
             tmpPath: String,
             packageName: String,
-            useRish: Boolean
+            useRish: Boolean,
+            gatewayPort: Int = 45161,
+            gatewayToken: String? = null
         ): Map<String, String> {
             val map = linkedMapOf(
                 "HOME" to homePath,
@@ -96,8 +207,12 @@ class SystemGatewayServer(
                 "TERM" to "xterm-256color",
                 "PATH" to "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin",
                 "AGY_APPLICATION_ID" to packageName,
-                "RISH_APPLICATION_ID" to packageName
+                "RISH_APPLICATION_ID" to packageName,
+                "AGY_GATEWAY_PORT" to gatewayPort.toString()
             )
+            if (!gatewayToken.isNullOrBlank()) {
+                map["AGY_GATEWAY_TOKEN"] = gatewayToken
+            }
             if (!useRish) {
                 map["LD_LIBRARY_PATH"] = "$filesPath/usr/lib:/system/lib64"
             }
@@ -139,6 +254,9 @@ class SystemGatewayServer(
     @Volatile
     private var boundPort: Int = port
 
+    val activePort: Int
+        get() = boundPort
+
     private val historyLock = Any()
     private val commandHistory = ArrayDeque<CommandRecord>(MAX_COMMAND_HISTORY)
 
@@ -176,6 +294,7 @@ class SystemGatewayServer(
     fun start() {
         if (running) return
         running = true
+        ensureGatewayToken(context.filesDir)
         val acceptor = Executors.newSingleThreadExecutor()
         val workers = Executors.newFixedThreadPool(6)
         acceptorExecutor = acceptor
@@ -263,6 +382,7 @@ class SystemGatewayServer(
                 val method = parts[0].uppercase()
                 val rawPath = parts[1]
 
+                val headers = HashMap<String, String>()
                 var contentLength = 0
                 var headerCount = 0
                 while (true) {
@@ -271,6 +391,11 @@ class SystemGatewayServer(
                     headerCount++
                     if (headerCount > MAX_HEADERS) {
                         throw HttpRejectException(431, "Request Header Fields Too Large", "Too many HTTP headers")
+                    }
+                    val colonIdx = headerLine.indexOf(':')
+                    if (colonIdx > 0) {
+                        headers[headerLine.substring(0, colonIdx).trim().lowercase()] =
+                            headerLine.substring(colonIdx + 1).trim()
                     }
                     if (headerLine.startsWith("Content-Length:", ignoreCase = true)) {
                         val parsed = headerLine.substringAfter(":").trim().toIntOrNull()
@@ -283,6 +408,18 @@ class SystemGatewayServer(
                         }
                         contentLength = parsed
                     }
+                }
+
+                validateHostAndOriginHeaders(headers)?.let { reason ->
+                    throw HttpRejectException(403, "Forbidden", reason)
+                }
+                val expectedToken = ensureGatewayToken(context.filesDir)
+                if (!isAuthorizedRequest(headers, expectedToken)) {
+                    throw HttpRejectException(
+                        401,
+                        "Unauthorized",
+                        "unauthorized: provide X-AGY-Token or Authorization: Bearer <token>"
+                    )
                 }
 
                 val body = if (contentLength > 0) {
@@ -667,7 +804,9 @@ class SystemGatewayServer(
                     homePath = homeDir.absolutePath,
                     tmpPath = tmpDir.absolutePath,
                     packageName = context.packageName,
-                    useRish = useRish
+                    useRish = useRish,
+                    gatewayPort = boundPort,
+                    gatewayToken = ensureGatewayToken(context.filesDir)
                 )
             )
 

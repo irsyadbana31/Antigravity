@@ -593,6 +593,12 @@ object BootstrapInstaller {
             export GIT_ATTR_NOSYSTEM=1
             export GIT_TERMINAL_PROMPT=0
             export ANTIGRAVITY_APP_DATA_DIR="${filesDir.absolutePath}/home/.gemini/antigravity-cli"
+            if [ -z "${'$'}{AGY_GATEWAY_PORT:-}" ] && [ -r "${filesDir.absolutePath}/logs/gateway.port" ]; then
+                export AGY_GATEWAY_PORT="${'$'}(tr -d '[:space:]' < "${filesDir.absolutePath}/logs/gateway.port" 2>/dev/null)"
+            fi
+            if [ -z "${'$'}{AGY_GATEWAY_TOKEN:-}" ] && [ -r "${filesDir.absolutePath}/logs/gateway.token" ]; then
+                export AGY_GATEWAY_TOKEN="${'$'}(tr -d '[:space:]' < "${filesDir.absolutePath}/logs/gateway.token" 2>/dev/null)"
+            fi
             LSE_COMPAT="${libDir.absolutePath}/${LseCompatHelper.LIB_FILENAME}"
             if [ -f "${'$'}LSE_COMPAT" ] && ! grep -qw atomics /proc/cpuinfo 2>/dev/null; then
                 exec "${ldBin.absolutePath}" --library-path "$libraryPath" --preload "${'$'}LSE_COMPAT" "${agyBin.absolutePath}" "${'$'}@"

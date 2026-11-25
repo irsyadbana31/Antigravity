@@ -11,7 +11,53 @@ set -e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 PREFIX="${PREFIX:-$(cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd)}"
+FILES_DIR="$(cd -- "$PREFIX/.." 2>/dev/null && pwd)"
 RISH_BIN="$PREFIX/bin/rish"
+GATEWAY_PORT="${AGY_GATEWAY_PORT:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.port" 2>/dev/null || true)}"
+GATEWAY_TOKEN="${AGY_GATEWAY_TOKEN:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.token" 2>/dev/null || true)}"
+PYTHON_BIN=""
+if [ -x "$PREFIX/bin/python3" ]; then
+    PYTHON_BIN="$PREFIX/bin/python3"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+fi
+
+notify_via_gateway() {
+    [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ] || return 1
+    AGY_NOTIFY_ACTION="$1" \
+    AGY_NOTIFY_TITLE="$2" \
+    AGY_NOTIFY_MSG="$3" \
+    AGY_NOTIFY_TAG="$4" \
+    AGY_GW_PORT="$GATEWAY_PORT" \
+    AGY_GW_TOKEN="$GATEWAY_TOKEN" \
+    "$PYTHON_BIN" - <<'PYEOF'
+import json, os, sys, urllib.request, zlib
+tag = os.environ.get("AGY_NOTIFY_TAG", "agy_task")
+notif_id = int(zlib.crc32(tag.encode("utf-8")) & 0x7fffffff)
+payload = {
+    "action": os.environ.get("AGY_NOTIFY_ACTION", "post"),
+    "title": os.environ.get("AGY_NOTIFY_TITLE", "Antigravity"),
+    "message": os.environ.get("AGY_NOTIFY_MSG", ""),
+    "tag": tag,
+    "id": notif_id,
+}
+req = urllib.request.Request(
+    f"http://127.0.0.1:{os.environ['AGY_GW_PORT']}/gateway/notify",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+        "Content-Type": "application/json",
+        "X-AGY-Token": os.environ["AGY_GW_TOKEN"],
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        sys.exit(0 if data.get("ok") else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+}
 
 USAGE="Usage: agy-notify [post|cancel|list] [options]
 Commands:
@@ -80,6 +126,10 @@ if [ "$CMD" = "post" ]; then
         BODY_TEXT="[$SUBTITLE] $MESSAGE"
     fi
 
+    if notify_via_gateway "post" "$TITLE" "$BODY_TEXT" "$TAG"; then
+        exit 0
+    fi
+
     if [ -x "$RISH_BIN" ]; then
         # Optional high-resolution logo cache with safe fallback to system default icon.
         LOGO_CACHE="/data/local/tmp/agy_logo.png"
@@ -108,6 +158,9 @@ if [ "$CMD" = "post" ]; then
     echo "[agy-notify] notification queued: $TITLE - $MESSAGE"
 
 elif [ "$CMD" = "cancel" ]; then
+    if notify_via_gateway "cancel" "" "" "$TAG"; then
+        exit 0
+    fi
     if [ -x "$RISH_BIN" ]; then
         "$RISH_BIN" -c "cmd notification cancel $(printf %q "$TAG")" 2>/dev/null || true
     fi

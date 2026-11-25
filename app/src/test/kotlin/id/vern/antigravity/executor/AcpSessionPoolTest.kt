@@ -1,5 +1,6 @@
 package id.vern.antigravity.executor
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
@@ -11,6 +12,15 @@ class AcpSessionPoolTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()
+
+    @Test
+    fun buildCancelNotificationJson_matchesJsonRpcSpec() {
+        val raw = AcpSessionPool.buildCancelNotificationJson("sess-abc-123")
+        val obj = JSONObject(raw)
+        assertEquals("2.0", obj.getString("jsonrpc"))
+        assertEquals("session/cancel", obj.getString("method"))
+        assertEquals("sess-abc-123", obj.getJSONObject("params").getString("sessionId"))
+    }
 
     @Test
     fun hashFileContentOrStat_returnsZeroForMissingFile() {

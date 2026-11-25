@@ -69,7 +69,7 @@ class CoreServerService : Service() {
         gatewayServer?.start()
 
         startBackgroundDaemon()
-        AppLogger.d("Engine", "CoreServerService running on ports 45158 & 45161")
+        AppLogger.d("Engine", "CoreServerService running (Gateway 127.0.0.1:${gatewayServer?.activePort ?: 45161})")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -137,6 +137,8 @@ class CoreServerService : Service() {
                     pb.environment()["PREFIX"] = "${filesDir.absolutePath}/usr"
                     pb.environment()["AGY_APPLICATION_ID"] = packageName
                     pb.environment()["APPLICATION_ID"] = packageName
+                    pb.environment()["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
+                    pb.environment()["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
                     pb.start()
                 }
             } catch (e: Exception) {

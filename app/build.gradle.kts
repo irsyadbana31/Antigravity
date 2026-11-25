@@ -25,9 +25,15 @@ android {
         applicationId = "id.vern.antigravity"
         applicationIdSuffix = ".turbo"
         minSdk = 26
+        // Must remain 28: Android 10+ (targetSdk >= 29) enforces SELinux execute_no_trans W^X,
+        // blocking execve() on agy/node/python3 binaries inside app filesDir.
         targetSdk = 28
-        versionCode = 8
-        versionName = "1.0.6-turbo"
+        versionCode = 9
+        versionName = "1.1.0-turbo"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
 
         vectorDrawables {
             useSupportLibrary = true
@@ -152,6 +158,34 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+val rustDirPath = rootProject.file("rust_turbo").absolutePath
+val testRustNative = tasks.register("testRustNative") {
+    description = "Runs cargo unit tests for rust_turbo when cargo is available on PATH"
+    doLast {
+        val cargoAvailable = try {
+            ProcessBuilder("cargo", "--version").start().waitFor() == 0
+        } catch (_: Exception) {
+            false
+        }
+        if (cargoAvailable) {
+            val proc = ProcessBuilder("cargo", "test")
+                .directory(java.io.File(rustDirPath))
+                .inheritIO()
+                .start()
+            val code = proc.waitFor()
+            if (code != 0) {
+                throw GradleException("rust_turbo cargo test failed with exit code $code")
+            }
+        } else {
+            println("Skipping rust_turbo cargo test (cargo not found on PATH)")
+        }
+    }
+}
+
+tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn(testRustNative)
 }
 
 tasks.matching { it.name == "assembleRelease" }.configureEach {

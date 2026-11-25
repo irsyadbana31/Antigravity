@@ -2,6 +2,7 @@ package id.vern.antigravity.executor
 
 import android.content.Context
 import android.util.Log
+import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.LseCompatHelper
 import id.vern.antigravity.nativebridge.RustTurboBridge
@@ -23,6 +24,24 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+
+/**
+ * Direct typed streaming events emitted by [AcpSessionPool] to avoid O(N^2) JSON
+ * serialization/re-parsing overhead during high-speed token streaming.
+ */
+sealed class AcpStreamEvent {
+    data class SessionInit(val conversationId: String) : AcpStreamEvent()
+    data class ThoughtDelta(val delta: String, val durationSeconds: Int, val isDone: Boolean) : AcpStreamEvent()
+    data class MessageDelta(val delta: String) : AcpStreamEvent()
+    data class ToolStep(
+        val toolCallId: String?,
+        val toolName: String,
+        val state: String,
+        val params: JSONObject?,
+        val output: String?
+    ) : AcpStreamEvent()
+    data class RawOutput(val line: String, val isError: Boolean) : AcpStreamEvent()
+}
 
 /**
  * Persistent supervisor & session pool for `agy acp`.
@@ -50,12 +69,15 @@ object AcpSessionPool {
         val addDirPath: String?,
         val configFingerprint: Long
     ) {
+        val writeLock = Any()
         val nextRpcId = AtomicInteger(1)
         val loadedSessions = HashSet<String>()
         val lastModelBySession = HashMap<String, String>()
         val activeStderrSink = AtomicReference<((String, Boolean) -> Unit)?>(null)
         val lastUsedAtMs = AtomicLong(System.currentTimeMillis())
         val broken = AtomicBoolean(false)
+        @Volatile
+        var activeSessionId: String? = null
 
         fun isHealthy(): Boolean = !broken.get() && process.isAlive
 
@@ -189,15 +211,58 @@ object AcpSessionPool {
         }
     }
 
+    internal fun buildCancelNotificationJson(sessionId: String): String =
+        JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("method", "session/cancel")
+            put("params", JSONObject().put("sessionId", sessionId))
+        }.toString()
+
     fun stopActiveTurn() {
         stopRequested = true
-        val toDestroy = synchronized(stateLock) {
+        val current = synchronized(stateLock) {
             cancelIdleReapLocked()
-            val cur = warmSession
-            warmSession = null
-            cur
+            warmSession
+        } ?: return
+
+        val sid = current.activeSessionId
+        if (!current.isHealthy() || sid.isNullOrBlank()) {
+            val toDestroy = synchronized(stateLock) {
+                val cur = warmSession
+                if (cur === current) warmSession = null
+                cur
+            }
+            toDestroy?.destroyQuietly()
+            return
         }
-        toDestroy?.destroyQuietly()
+
+        // Send graceful JSON-RPC session/cancel so the warm daemon stays alive for the next turn
+        Thread({
+            try {
+                val cancelLine = buildCancelNotificationJson(sid)
+                synchronized(current.writeLock) {
+                    current.writer.write(cancelLine)
+                    current.writer.newLine()
+                    current.writer.flush()
+                }
+            } catch (_: Exception) {
+                current.broken.set(true)
+            }
+        }, "AcpSessionPool-Cancel").apply { isDaemon = true }.start()
+
+        idleScheduler.schedule({
+            val toDestroy = synchronized(stateLock) {
+                val cur = warmSession
+                if (cur === current && ((turnInProgress && stopRequested) || cur.broken.get())) {
+                    warmSession = null
+                    cur
+                } else null
+            }
+            if (toDestroy != null) {
+                Log.w(TAG, "ACP session/cancel grace period expired; recycling daemon")
+                toDestroy.destroyQuietly()
+            }
+        }, 1_500L, TimeUnit.MILLISECONDS)
     }
 
     fun invalidate(reason: String) {
@@ -267,6 +332,9 @@ object AcpSessionPool {
         var hash = 17L
         val email = prefs.getString(OAuthManager.KEY_USER_EMAIL, "") ?: ""
         hash = 31L * hash + email.hashCode().toLong()
+        val appPrefs = context.getSharedPreferences("antigravity_prefs", Context.MODE_PRIVATE)
+        val skipPerm = appPrefs.getBoolean("ag_skip_permissions", true)
+        hash = 31L * hash + if (skipPerm) 1L else 0L
 
         // Hash content of small config files so mtime-only touches never invalidate a warm daemon
         val trackedConfigs = listOf(
@@ -331,12 +399,18 @@ object AcpSessionPool {
             .filter { File(it).exists() }
             .joinToString(":")
 
+        val skipPermissions = context.getSharedPreferences("antigravity_prefs", Context.MODE_PRIVATE)
+            .getBoolean("ag_skip_permissions", true)
+        val acpArgs = mutableListOf("acp").apply {
+            if (skipPermissions) add("--dangerously-skip-permissions")
+        }
+
         val cmdList = LseCompatHelper.buildGlibcLoaderCommand(
             ldBin = ldBin,
             libraryPaths = libraryPaths,
             glibcLibDir = libDir,
             targetBin = agyBin,
-            args = listOf("acp", "--dangerously-skip-permissions")
+            args = acpArgs
         )
         if (addDir != null && addDir.exists() && addDir.isDirectory) {
             cmdList.add("--add-dir")
@@ -374,6 +448,8 @@ object AcpSessionPool {
         env["AGY_APPLICATION_ID"] = context.packageName
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+        env["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
+        env["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
 
         val process = try {
             pb.start()
@@ -449,9 +525,11 @@ object AcpSessionPool {
             put("method", method)
             put("params", params)
         }
-        session.writer.write(req.toString())
-        session.writer.newLine()
-        session.writer.flush()
+        synchronized(session.writeLock) {
+            session.writer.write(req.toString())
+            session.writer.newLine()
+            session.writer.flush()
+        }
     }
 
     private fun readSimpleResponse(session: ManagedAcpProcess, expectedId: Int): JSONObject? {
@@ -498,6 +576,7 @@ object AcpSessionPool {
         cliModelId: String? = null,
         sessionToResume: String? = null,
         workingDir: File? = null,
+        onStreamEvent: ((AcpStreamEvent) -> Unit)? = null,
         onOutputLine: (String, Boolean) -> Unit
     ): Int {
         EngineExecutor.healEnvironment(context)
@@ -553,7 +632,14 @@ object AcpSessionPool {
                         null
                     }
                 } ?: run {
-                    val spawned = spawnAndInitialize(context, targetCwd, addDir, fingerprint, onOutputLine)
+                    val stderrForwarder: (String, Boolean) -> Unit = { l, isErr ->
+                        if (onStreamEvent != null) {
+                            onStreamEvent(AcpStreamEvent.RawOutput(l, isErr))
+                        } else {
+                            onOutputLine(l, isErr)
+                        }
+                    }
+                    val spawned = spawnAndInitialize(context, targetCwd, addDir, fingerprint, stderrForwarder)
                     if (spawned == null) {
                         if (!recordCrashAndBackoff()) {
                             return EngineExecutor.ACP_UNAVAILABLE
@@ -566,7 +652,13 @@ object AcpSessionPool {
                     spawned
                 }
 
-                session.activeStderrSink.set(onOutputLine)
+                session.activeStderrSink.set { line, isErr ->
+                    if (onStreamEvent != null) {
+                        onStreamEvent(AcpStreamEvent.RawOutput(line, isErr))
+                    } else {
+                        onOutputLine(line, isErr)
+                    }
+                }
                 var activeSessionId = ""
                 val thoughtSb = StringBuilder()
                 var thoughtStartMs = 0L
@@ -579,22 +671,27 @@ object AcpSessionPool {
                 }
 
                 fun flushThoughtDone() {
-                    if (thoughtSb.isEmpty()) return
+                    if (thoughtStartMs == 0L && thoughtSb.isEmpty()) return
                     val durSec = if (thoughtStartMs > 0L) {
                         ((System.currentTimeMillis() - thoughtStartMs) / 1000L).toInt().coerceAtLeast(1)
                     } else 1
-                    val stepObj = JSONObject().apply {
-                        put("step_type", "thought")
-                        put("state", "DONE")
-                        put("text", thoughtSb.toString())
-                        put("duration_seconds", durSec)
+                    if (onStreamEvent != null) {
+                        emittedAnyOutput = true
+                        onStreamEvent(AcpStreamEvent.ThoughtDelta("", durSec, isDone = true))
+                    } else if (thoughtSb.isNotEmpty()) {
+                        val stepObj = JSONObject().apply {
+                            put("step_type", "thought")
+                            put("state", "DONE")
+                            put("text", thoughtSb.toString())
+                            put("duration_seconds", durSec)
+                        }
+                        val evt = JSONObject().apply {
+                            put("event", "step_update")
+                            if (activeSessionId.isNotBlank()) put("conversation_id", activeSessionId)
+                            put("step_update", stepObj)
+                        }
+                        emitLine(evt.toString(), false)
                     }
-                    val evt = JSONObject().apply {
-                        put("event", "step_update")
-                        if (activeSessionId.isNotBlank()) put("conversation_id", activeSessionId)
-                        put("step_update", stepObj)
-                    }
-                    emitLine(evt.toString(), false)
                     thoughtSb.clear()
                     thoughtStartMs = 0L
                 }
@@ -602,8 +699,13 @@ object AcpSessionPool {
                 fun handleThoughtChunk(chunk: String) {
                     if (chunk.isEmpty()) return
                     if (thoughtStartMs == 0L) thoughtStartMs = System.currentTimeMillis()
-                    thoughtSb.append(chunk)
                     val durSec = ((System.currentTimeMillis() - thoughtStartMs) / 1000L).toInt().coerceAtLeast(1)
+                    if (onStreamEvent != null) {
+                        emittedAnyOutput = true
+                        onStreamEvent(AcpStreamEvent.ThoughtDelta(chunk, durSec, isDone = false))
+                        return
+                    }
+                    thoughtSb.append(chunk)
                     val stepObj = JSONObject().apply {
                         put("step_type", "thought")
                         put("state", "ACTIVE")
@@ -622,6 +724,11 @@ object AcpSessionPool {
                 fun handleMessageChunk(chunk: String) {
                     flushThoughtDone()
                     if (chunk.isEmpty()) return
+                    if (onStreamEvent != null) {
+                        emittedAnyOutput = true
+                        onStreamEvent(AcpStreamEvent.MessageDelta(chunk))
+                        return
+                    }
                     responseSb.append(chunk)
                     val stepObj = JSONObject().apply {
                         put("step_type", "agent_response")
@@ -638,6 +745,7 @@ object AcpSessionPool {
 
                 fun handleToolUpdate(upd: JSONObject) {
                     flushThoughtDone()
+                    val toolCallId = upd.optString("toolCallId").ifBlank { upd.optString("id").ifBlank { null } }
                     val toolName = upd.optString("name").ifBlank { upd.optString("title", "tool") }
                     val status = upd.optString("status").lowercase()
                     val state = if (status == "completed" || status == "failed" || status == "cancelled" || status == "done") {
@@ -645,16 +753,31 @@ object AcpSessionPool {
                     } else {
                         "ACTIVE"
                     }
-                    val argsObj = upd.optJSONObject("args") ?: upd.optJSONObject("rawInput")
+                    val argsObj = upd.optJSONObject("args") ?: upd.optJSONObject("rawInput") ?: upd.optJSONObject("parameters")
+                    val outputText = extractToolOutput(upd)
+                    if (onStreamEvent != null) {
+                        emittedAnyOutput = true
+                        onStreamEvent(
+                            AcpStreamEvent.ToolStep(
+                                toolCallId = toolCallId,
+                                toolName = toolName,
+                                state = state,
+                                params = argsObj,
+                                output = outputText
+                            )
+                        )
+                        return
+                    }
                     val toolInfo = JSONObject().apply {
                         if (argsObj != null) put("args", argsObj)
                     }
                     val stepObj = JSONObject().apply {
                         put("step_type", "tool")
                         put("state", state)
+                        if (toolCallId != null) put("tool_call_id", toolCallId)
                         put("tool_name", toolName)
                         put("tool_info", toolInfo)
-                        extractToolOutput(upd)?.let { put("output", it) }
+                        outputText?.let { put("output", it) }
                     }
                     val evt = JSONObject().apply {
                         put("event", "step_update")
@@ -759,10 +882,16 @@ object AcpSessionPool {
                         session.loadedSessions.add(activeSessionId)
                     }
 
-                    emitLine(JSONObject().apply {
-                        put("event", "init")
-                        put("conversation_id", activeSessionId)
-                    }.toString(), false)
+                    session.activeSessionId = activeSessionId
+                    if (onStreamEvent != null) {
+                        emittedAnyOutput = true
+                        onStreamEvent(AcpStreamEvent.SessionInit(activeSessionId))
+                    } else {
+                        emitLine(JSONObject().apply {
+                            put("event", "init")
+                            put("conversation_id", activeSessionId)
+                        }.toString(), false)
+                    }
 
                     // 2. Select model if specified and changed
                     if (!cliModelId.isNullOrBlank() && session.lastModelBySession[activeSessionId] != cliModelId) {
@@ -794,18 +923,29 @@ object AcpSessionPool {
                         throw java.io.IOException("ACP EOF during session/prompt")
                     }
                     if (promptResp.has("error")) {
-                        val errMsg = promptResp.optJSONObject("error")?.optString("message") ?: "ACP prompt error"
-                        onOutputLine(errMsg, true)
-                        1
+                        if (stopRequested) {
+                            consecutiveCrashCount = 0
+                            0
+                        } else {
+                            val errMsg = promptResp.optJSONObject("error")?.optString("message") ?: "ACP prompt error"
+                            if (onStreamEvent != null) {
+                                onStreamEvent(AcpStreamEvent.RawOutput(errMsg, true))
+                            } else {
+                                onOutputLine(errMsg, true)
+                            }
+                            1
+                        }
                     } else {
-                        onOutputLine(JSONObject().apply {
-                            put("event", "result")
-                            put("conversation_id", activeSessionId)
-                            put("result", JSONObject().apply {
-                                put("status", "SUCCESS")
-                                put("response", responseSb.toString())
-                            })
-                        }.toString(), false)
+                        if (onStreamEvent == null) {
+                            onOutputLine(JSONObject().apply {
+                                put("event", "result")
+                                put("conversation_id", activeSessionId)
+                                put("result", JSONObject().apply {
+                                    put("status", "SUCCESS")
+                                    put("response", responseSb.toString())
+                                })
+                            }.toString(), false)
+                        }
                         consecutiveCrashCount = 0
                         0
                     }
@@ -827,6 +967,7 @@ object AcpSessionPool {
                     }
                     if (activeSessionId.isBlank() && !stopRequested) EngineExecutor.ACP_UNAVAILABLE else -1
                 } finally {
+                    session.activeSessionId = null
                     session.activeStderrSink.set(null)
                     session.lastUsedAtMs.set(System.currentTimeMillis())
                     if (session.broken.get()) {

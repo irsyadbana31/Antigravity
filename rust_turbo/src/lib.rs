@@ -43,6 +43,100 @@ fn is_numbered_line(trimmed: &str) -> Option<(&str, &str)> {
     None
 }
 
+fn parse_table_cells(line: &str) -> Vec<String> {
+    let mut trimmed = line.trim();
+    if let Some(stripped) = trimmed.strip_prefix('|') {
+        trimmed = stripped;
+    }
+    if trimmed.ends_with('|') {
+        let backslashes = trimmed[..trimmed.len() - 1]
+            .bytes()
+            .rev()
+            .take_while(|&b| b == b'\\')
+            .count();
+        if backslashes % 2 == 0 {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+    }
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = trimmed.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some(&'|') => {
+                    chars.next();
+                    current.push('|');
+                }
+                Some(&'\\') => {
+                    chars.next();
+                    current.push('\\');
+                }
+                _ => current.push('\\'),
+            }
+        } else if c == '|' {
+            cells.push(current.trim().to_string());
+            current.clear();
+        } else {
+            current.push(c);
+        }
+    }
+    cells.push(current.trim().to_string());
+    cells
+}
+
+fn parse_table_delimiter(line: &str) -> Option<Vec<char>> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return None;
+    }
+    let cells = parse_table_cells(trimmed);
+    if cells.is_empty() {
+        return None;
+    }
+    let mut aligns = Vec::with_capacity(cells.len());
+    for cell in cells {
+        if cell.is_empty() {
+            return None;
+        }
+        let left = cell.starts_with(':');
+        let right = cell.ends_with(':');
+        let inner_start = if left { 1 } else { 0 };
+        let inner_end = if right && cell.len() > inner_start {
+            cell.len() - 1
+        } else {
+            cell.len()
+        };
+        let dashes = &cell[inner_start..inner_end];
+        if dashes.is_empty() || !dashes.bytes().all(|b| b == b'-') {
+            return None;
+        }
+        let align = match (left, right) {
+            (true, true) => 'C',
+            (false, true) => 'R',
+            _ => 'L',
+        };
+        aligns.push(align);
+    }
+    Some(aligns)
+}
+
+fn try_table_start(lines: &[&str], idx: usize) -> Option<(Vec<String>, Vec<char>)> {
+    if idx + 1 >= lines.len() {
+        return None;
+    }
+    let header_line = lines[idx].trim();
+    if !header_line.contains('|') || header_line.starts_with("```") {
+        return None;
+    }
+    let aligns = parse_table_delimiter(lines[idx + 1])?;
+    let headers = parse_table_cells(header_line);
+    if headers.is_empty() {
+        return None;
+    }
+    Some((headers, aligns))
+}
+
 fn is_paragraph_breaker(trimmed: &str) -> bool {
     trimmed.is_empty()
         || trimmed.starts_with("```")
@@ -53,6 +147,18 @@ fn is_paragraph_breaker(trimmed: &str) -> bool {
         || trimmed == "___"
         || is_bullet_line(trimmed).is_some()
         || is_numbered_line(trimmed).is_some()
+}
+
+fn is_paragraph_breaker_at(lines: &[&str], idx: usize) -> bool {
+    let trimmed = lines[idx].trim();
+    is_paragraph_breaker(trimmed) || try_table_start(lines, idx).is_some()
+}
+
+fn sanitize_table_cell(cell: &str) -> String {
+    if !cell.contains('\x1E') && !cell.contains('\x1F') {
+        return cell.to_string();
+    }
+    cell.replace(['\x1E', '\x1F'], " ")
 }
 
 fn parse_markdown_fast(content: &str) -> String {
@@ -132,9 +238,19 @@ fn parse_markdown_fast(content: &str) -> String {
             continue;
         }
 
-        // Bullet list item
+        // Bullet list item & GFM task list (- [ ] / - [x])
         if let Some(text) = is_bullet_line(trimmed) {
-            append_record(&mut out, 'L', "•", text);
+            if let Some(rest) = text.strip_prefix("[ ] ") {
+                append_record(&mut out, 'X', "0", rest.trim_start());
+            } else if let Some(rest) = text.strip_prefix("[x] ").or_else(|| text.strip_prefix("[X] ")) {
+                append_record(&mut out, 'X', "1", rest.trim_start());
+            } else if text == "[ ]" {
+                append_record(&mut out, 'X', "0", "");
+            } else if text == "[x]" || text == "[X]" {
+                append_record(&mut out, 'X', "1", "");
+            } else {
+                append_record(&mut out, 'L', "•", text);
+            }
             i += 1;
             continue;
         }
@@ -155,12 +271,66 @@ fn parse_markdown_fast(content: &str) -> String {
             continue;
         }
 
+        // GFM Table
+        if let Some((mut headers, mut aligns)) = try_table_start(&lines, i) {
+            let col_count = headers.len().max(aligns.len());
+            while headers.len() < col_count {
+                headers.push(String::new());
+            }
+            while aligns.len() < col_count {
+                aligns.push('L');
+            }
+            i += 2; // consume header + delimiter
+
+            let mut encoded_rows = String::new();
+            for (c_idx, cell) in headers.iter().take(col_count).enumerate() {
+                if c_idx > 0 {
+                    encoded_rows.push('\x1F');
+                }
+                encoded_rows.push_str(&sanitize_table_cell(cell));
+            }
+
+            while i < lines.len() {
+                let row_trim = lines[i].trim();
+                if row_trim.is_empty()
+                    || !row_trim.contains('|')
+                    || row_trim.starts_with("```")
+                    || row_trim.starts_with('#')
+                    || row_trim.starts_with('>')
+                {
+                    break;
+                }
+                let mut row_cells = parse_table_cells(row_trim);
+                while row_cells.len() < col_count {
+                    row_cells.push(String::new());
+                }
+                encoded_rows.push('\x1E');
+                for (c_idx, cell) in row_cells.iter().take(col_count).enumerate() {
+                    if c_idx > 0 {
+                        encoded_rows.push('\x1F');
+                    }
+                    encoded_rows.push_str(&sanitize_table_cell(cell));
+                }
+                i += 1;
+            }
+
+            let mut meta = String::with_capacity(col_count * 2);
+            for (c_idx, a) in aligns.iter().enumerate() {
+                if c_idx > 0 {
+                    meta.push(',');
+                }
+                meta.push(*a);
+            }
+            append_record(&mut out, 'T', &meta, &encoded_rows);
+            continue;
+        }
+
         // Paragraph
         let mut para = String::new();
         let mut first = true;
         while i < lines.len() {
             let cur_trim = lines[i].trim();
-            if is_paragraph_breaker(cur_trim) {
+            if is_paragraph_breaker_at(&lines, i) {
                 break;
             }
             if !first {
@@ -466,8 +636,102 @@ pub extern "system" fn Java_id_vern_antigravity_nativebridge_RustTurboBridge_nat
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    match env.new_string("antigravity-turbo-rust 1.1.0 (native)") {
+    match env.new_string("antigravity-turbo-rust 1.2.0 (native)") {
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn decode_records(encoded: &str) -> Vec<(char, String, String)> {
+        let utf16: Vec<u16> = encoded.encode_utf16().collect();
+        let mut out = Vec::new();
+        let mut cur = 0usize;
+        while cur < utf16.len() {
+            let nl = utf16[cur..].iter().position(|&u| u == b'\n' as u16).unwrap();
+            let header = String::from_utf16(&utf16[cur..cur + nl]).unwrap();
+            cur += nl + 1;
+            let mut parts = header.split(' ');
+            let tag = parts.next().unwrap().chars().next().unwrap();
+            let meta_len: usize = parts.next().unwrap().parse().unwrap();
+            let body_len: usize = parts.next().unwrap().parse().unwrap();
+            let meta = String::from_utf16(&utf16[cur..cur + meta_len]).unwrap();
+            cur += meta_len;
+            let body = String::from_utf16(&utf16[cur..cur + body_len]).unwrap();
+            cur += body_len;
+            out.push((tag, meta, body));
+        }
+        out
+    }
+
+    #[test]
+    fn parses_gfm_table_with_alignments_escapes_and_emojis() {
+        let md = "Intro line\n| Kolom | Rata | Status |\n| :--- | :---: | ---: |\n| a \\| b | ok 🚀 | 100 |\n";
+        let recs = decode_records(&parse_markdown_fast(md));
+        assert_eq!(recs.len(), 2);
+        assert_eq!(recs[0], ('P', "".to_string(), "Intro line".to_string()));
+        assert_eq!(recs[1].0, 'T');
+        assert_eq!(recs[1].1, "L,C,R");
+        let rows: Vec<&str> = recs[1].2.split('\x1E').collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].split('\x1F').collect::<Vec<_>>(), vec!["Kolom", "Rata", "Status"]);
+        assert_eq!(rows[1].split('\x1F').collect::<Vec<_>>(), vec!["a | b", "ok 🚀", "100"]);
+    }
+
+    #[test]
+    fn parses_task_lists_and_regular_bullets() {
+        let md = "- [ ] Todo\n* [x] Done lower\n+ [X] Done upper 🚀\n- Normal bullet\n";
+        let recs = decode_records(&parse_markdown_fast(md));
+        assert_eq!(
+            recs,
+            vec![
+                ('X', "0".to_string(), "Todo".to_string()),
+                ('X', "1".to_string(), "Done lower".to_string()),
+                ('X', "1".to_string(), "Done upper 🚀".to_string()),
+                ('L', "•".to_string(), "Normal bullet".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_ansi_escapes_preserving_utf8() {
+        let raw = "\x1B[32mPASS\x1B[0m \x1B]0;title\x07Halo 🚀\r\n";
+        assert_eq!(strip_ansi_fast(raw), "PASS Halo 🚀\n");
+    }
+
+    #[test]
+    fn parses_acp_lines() {
+        let msg = r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"halo"}}}}"#;
+        assert_eq!(parse_acp_line_fast(msg).as_deref(), Some("M\nhalo"));
+        let thought = r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"hmm"}}}}"#;
+        assert_eq!(parse_acp_line_fast(thought).as_deref(), Some("T\nhmm"));
+        let tool = r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc1"}}}"#;
+        assert_eq!(parse_acp_line_fast(tool).as_deref(), Some("C"));
+        let resp = r#"{"jsonrpc":"2.0","id":7,"result":{}}"#;
+        assert_eq!(parse_acp_line_fast(resp).as_deref(), Some("R\n7"));
+    }
+
+    #[test]
+    fn patches_core_binary_all_four_patterns() {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("agy_patch_test_{}.bin", ts));
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[0xe0, 0x36, 0x80, 0xd2]);
+        payload.extend_from_slice(b"____");
+        payload.extend_from_slice(&[0x80, 0x38, 0x80, 0xd2]);
+        payload.extend_from_slice(b"/bin/bash");
+        payload.extend_from_slice(b"/etc/resolv.conf");
+        std::fs::write(&path, &payload).unwrap();
+
+        let mask = patch_core_binary(path.to_str().unwrap()).unwrap();
+        assert_eq!(mask, 0b1111);
+        let patched = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(memmem::find(&patched, b"/bin///sh").is_some());
+        assert!(memmem::find(&patched, b"etc//resolv.conf").is_some());
     }
 }

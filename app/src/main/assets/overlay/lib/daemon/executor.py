@@ -14,7 +14,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 PREFIX = os.environ.get("PREFIX") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-HOME = os.environ.get("HOME") or os.path.dirname(PREFIX)
+FILES_DIR = os.path.dirname(os.path.normpath(PREFIX))
+HOME = os.environ.get("HOME") or os.path.join(FILES_DIR, "home")
 
 
 def application_id_from_prefix():
@@ -117,19 +118,38 @@ def run_task_worker(task):
 
     log(f"Worker started for task [{name}] (ID: {task_id})")
 
-    if not command and prompt:
-        command = f"agy-notify post -t 'AI Task Trigger' -m '{prompt[:100]}'"
-
     notify("Antigravity Daemon", f"Running task: {name}", tag=f"task_{task_id}")
 
     start_t = time.time()
     success = False
     output = ""
     env = os.environ.copy()
-    prefix = env.get("PREFIX", "/data/user/0/id.vern.antigravity/files/usr")
-    home = env.get("HOME", "/data/user/0/id.vern.antigravity/files/home")
-    env["PATH"] = f"{prefix}/bin:{env.get('PATH', '')}"
+    prefix = env.get("PREFIX") or PREFIX
+    files_dir = os.path.dirname(os.path.normpath(prefix))
+    home = env.get("HOME") or os.path.join(files_dir, "home")
+    env["PREFIX"] = prefix
+    env["PATH"] = f"{prefix}/bin:{files_dir}/engine/bin:{env.get('PATH', '')}"
     env["HOME"] = home
+    if not env.get("AGY_GATEWAY_PORT"):
+        port_file = os.path.join(files_dir, "logs", "gateway.port")
+        if os.path.isfile(port_file):
+            try:
+                with open(port_file, "r", encoding="utf-8") as pf:
+                    port_val = pf.read().strip()
+                if port_val:
+                    env["AGY_GATEWAY_PORT"] = port_val
+            except Exception:
+                pass
+    if not env.get("AGY_GATEWAY_TOKEN"):
+        token_file = os.path.join(files_dir, "logs", "gateway.token")
+        if os.path.isfile(token_file):
+            try:
+                with open(token_file, "r", encoding="utf-8") as tf:
+                    tok_val = tf.read().strip()
+                if tok_val:
+                    env["AGY_GATEWAY_TOKEN"] = tok_val
+            except Exception:
+                pass
     if convo_id:
         env["AGY_CONVERSATION_ID"] = convo_id
     if project:
@@ -138,17 +158,42 @@ def run_task_worker(task):
     cwd = project if (project and os.path.isdir(project)) else home
 
     try:
-        res = subprocess.run(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=task.get("timeout_sec", 600),
-            env=env,
-            cwd=cwd,
-            executable=BASH_BIN if os.path.isfile(BASH_BIN) else "/system/bin/sh"
-        )
+        if not command and prompt:
+            agy_wrapper = os.path.join(prefix, "bin", "agy")
+            if not os.path.exists(agy_wrapper):
+                raise FileNotFoundError(f"agy wrapper not found at {agy_wrapper}")
+            cmd_args = [
+                agy_wrapper,
+                "--dangerously-skip-permissions",
+                "--print",
+                "--output-format",
+                "text",
+            ]
+            if convo_id:
+                cmd_args.extend(["--conversation", convo_id])
+            cmd_args.append(prompt)
+            res = subprocess.run(
+                cmd_args,
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=task.get("timeout_sec", 600),
+                env=env,
+                cwd=cwd,
+            )
+        else:
+            res = subprocess.run(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=task.get("timeout_sec", 600),
+                env=env,
+                cwd=cwd,
+                executable=BASH_BIN if os.path.isfile(BASH_BIN) else "/system/bin/sh"
+            )
         success = (res.returncode == 0)
         output = res.stdout.strip()
     except subprocess.TimeoutExpired:

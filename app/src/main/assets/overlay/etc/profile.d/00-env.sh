@@ -18,6 +18,16 @@ if [ -z "${AGY_APPLICATION_ID:-}" ]; then
     unset _agy_pkg_dir
 fi
 export AGY_APPLICATION_ID
+_agy_files_dir="$(dirname "$PREFIX")"
+if [ -z "${AGY_GATEWAY_PORT:-}" ] && [ -r "$_agy_files_dir/logs/gateway.port" ]; then
+    AGY_GATEWAY_PORT="$(tr -d '[:space:]' < "$_agy_files_dir/logs/gateway.port" 2>/dev/null || true)"
+fi
+[ -n "${AGY_GATEWAY_PORT:-}" ] && export AGY_GATEWAY_PORT
+if [ -z "${AGY_GATEWAY_TOKEN:-}" ] && [ -r "$_agy_files_dir/logs/gateway.token" ]; then
+    AGY_GATEWAY_TOKEN="$(tr -d '[:space:]' < "$_agy_files_dir/logs/gateway.token" 2>/dev/null || true)"
+fi
+[ -n "${AGY_GATEWAY_TOKEN:-}" ] && export AGY_GATEWAY_TOKEN
+unset _agy_files_dir
 export SSL_CERT_FILE="$PREFIX/etc/tls/cert.pem"
 export CURL_CA_BUNDLE="$PREFIX/etc/tls/cert.pem"
 export GIT_SSL_CAINFO="$PREFIX/etc/tls/cert.pem"

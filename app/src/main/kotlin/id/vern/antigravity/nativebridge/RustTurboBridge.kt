@@ -128,6 +128,23 @@ object RustTurboBridge {
                 'H' -> result.add(MarkdownElement.Heading(meta.toIntOrNull() ?: 1, body))
                 'C' -> result.add(MarkdownElement.CodeBlock(meta, body))
                 'L' -> result.add(MarkdownElement.ListItem(meta, body))
+                'X' -> result.add(MarkdownElement.TaskItem(meta == "1", body))
+                'T' -> {
+                    val rawRows = body.split('\u001E')
+                    if (rawRows.isEmpty()) return null
+                    val headers = rawRows[0].split('\u001F')
+                    val aligns = if (meta.isBlank()) {
+                        List(headers.size) { 'L' }
+                    } else {
+                        meta.split(',').map { it.firstOrNull() ?: 'L' }
+                    }
+                    val dataRows = if (rawRows.size > 1) {
+                        rawRows.drop(1).map { it.split('\u001F') }
+                    } else {
+                        emptyList()
+                    }
+                    result.add(MarkdownElement.Table(headers, aligns, dataRows))
+                }
                 'Q' -> result.add(MarkdownElement.BlockQuote(body))
                 'D' -> result.add(MarkdownElement.Divider)
                 'P' -> result.add(MarkdownElement.Paragraph(body))

@@ -21,6 +21,10 @@ object ConversationPersistence {
 
     fun saveConversationHistory(context: Context, history: List<ConversationSummary>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_CONVERSATION_HISTORY, serializeHistoryJson(history)).apply()
+    }
+
+    internal fun serializeHistoryJson(history: List<ConversationSummary>): String {
         val jsonArray = JSONArray()
         for (item in history) {
             val obj = JSONObject().apply {
@@ -30,15 +34,20 @@ object ConversationPersistence {
                 put("messageCount", item.messageCount)
                 put("isPinned", item.isPinned)
                 if (item.projectPath != null) put("projectPath", item.projectPath)
+                if (!item.cliSessionId.isNullOrBlank()) put("cliSessionId", item.cliSessionId)
             }
             jsonArray.put(obj)
         }
-        prefs.edit().putString(KEY_CONVERSATION_HISTORY, jsonArray.toString()).apply()
+        return jsonArray.toString()
     }
 
     fun loadConversationHistory(context: Context): List<ConversationSummary> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val jsonStr = prefs.getString(KEY_CONVERSATION_HISTORY, null)
+        return parseHistoryJson(jsonStr)
+    }
+
+    internal fun parseHistoryJson(jsonStr: String?): List<ConversationSummary> {
         val list = mutableListOf<ConversationSummary>()
         if (!jsonStr.isNullOrBlank()) {
             try {
@@ -52,7 +61,8 @@ object ConversationPersistence {
                             timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
                             messageCount = obj.optInt("messageCount", 0),
                             isPinned = obj.optBoolean("isPinned", false),
-                            projectPath = if (obj.has("projectPath")) obj.getString("projectPath") else null
+                            projectPath = if (obj.has("projectPath")) obj.getString("projectPath") else null,
+                            cliSessionId = obj.optString("cliSessionId", "").ifBlank { null }
                         )
                     )
                 }

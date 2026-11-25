@@ -214,7 +214,7 @@
     <string name="dev_userspace_engine_title">Userspace &amp; Background Engine</string>
     <string name="dev_userspace_prefix_title">Awalan Linux Userspace</string>
     <string name="dev_core_service_title">Core Service &amp; agy-daemon</string>
-    <string name="dev_core_service_desc">Mendengarkan di 127.0.0.1:45158 &amp; 45161</string>
+    <string name="dev_core_service_desc">Mendengarkan di 127.0.0.1:45161</string>
     <string name="dev_btn_stop_core_service">Stop</string>
     <string name="dev_btn_start_core_service">Mulai</string>
     <string name="dev_btn_restart_core_service">Restart</string>

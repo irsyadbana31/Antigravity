@@ -2,6 +2,7 @@ package id.vern.antigravity.executor
 
 import android.content.Context
 import android.system.Os
+import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.LseCompatHelper
 import id.vern.antigravity.oauth.OAuthManager
@@ -34,6 +35,11 @@ object EngineExecutor {
         isGitPermissionsSet = false
         isAgyConfigSynced = false
         AcpSessionPool.invalidate("env_invalidated")
+    }
+
+    private fun injectGatewayEnv(env: MutableMap<String, String>, filesDir: File) {
+        env["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
+        env["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
     }
 
     suspend fun executeCommand(
@@ -145,6 +151,7 @@ object EngineExecutor {
             env["AGY_APPLICATION_ID"] = context.packageName
             env["APPLICATION_ID"] = context.packageName
             env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+            injectGatewayEnv(env, filesDir)
 
             val process = pb.start()
 
@@ -348,6 +355,7 @@ object EngineExecutor {
                 env["AGY_APPLICATION_ID"] = context.packageName
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+                injectGatewayEnv(env, filesDir)
 
                 streamProcess(pb, onOutputLine)
             } catch (e: Exception) {
@@ -402,6 +410,7 @@ object EngineExecutor {
                 env["AGY_APPLICATION_ID"] = context.packageName
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+                injectGatewayEnv(env, filesDir)
                 streamProcess(pb, onOutputLine)
             } catch (e: Exception) {
                 onOutputLine("Engine wrapper execution failed: ${e.message}", true)
@@ -497,6 +506,7 @@ object EngineExecutor {
         cliModelId: String? = null,
         sessionToResume: String? = null,
         workingDir: File? = null,
+        onStreamEvent: ((AcpStreamEvent) -> Unit)? = null,
         onOutputLine: (String, Boolean) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         AcpSessionPool.executeTurn(
@@ -505,6 +515,7 @@ object EngineExecutor {
             cliModelId = cliModelId,
             sessionToResume = sessionToResume,
             workingDir = workingDir,
+            onStreamEvent = onStreamEvent,
             onOutputLine = onOutputLine
         )
     }
@@ -745,6 +756,7 @@ object EngineExecutor {
         env["AGY_APPLICATION_ID"] = context.packageName
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+        injectGatewayEnv(env, filesDir)
 
         val process = try {
             pb.start()
@@ -852,6 +864,7 @@ object EngineExecutor {
         env["AGY_APPLICATION_ID"] = context.packageName
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+        injectGatewayEnv(env, filesDir)
 
         val process = try {
             pb.start()
