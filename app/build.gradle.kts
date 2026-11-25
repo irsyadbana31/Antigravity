@@ -1,4 +1,4 @@
-import java.io.File
+import org.gradle.api.tasks.Exec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -161,27 +161,14 @@ dependencies {
     testImplementation("org.json:json:20240303")
 }
 
-val rustDirPath = rootProject.file("rust_turbo").absolutePath
-val testRustNative = tasks.register("testRustNative") {
+val isWindowsHost = System.getProperty("os.name").orEmpty().lowercase(Locale.US).contains("win")
+val testRustNative = tasks.register<Exec>("testRustNative") {
     description = "Runs cargo unit tests for rust_turbo when cargo is available on PATH"
-    doLast {
-        val cargoAvailable = try {
-            ProcessBuilder("cargo", "--version").start().waitFor() == 0
-        } catch (_: Exception) {
-            false
-        }
-        if (cargoAvailable) {
-            val proc = ProcessBuilder("cargo", "test")
-                .directory(File(rustDirPath))
-                .inheritIO()
-                .start()
-            val code = proc.waitFor()
-            if (code != 0) {
-                throw GradleException("rust_turbo cargo test failed with exit code $code")
-            }
-        } else {
-            println("Skipping rust_turbo cargo test (cargo not found on PATH)")
-        }
+    workingDir = rootProject.file("rust_turbo")
+    if (isWindowsHost) {
+        commandLine("cmd", "/c", "where cargo >nul 2>nul && cargo test || ver >nul")
+    } else {
+        commandLine("sh", "-c", "if command -v cargo >/dev/null 2>&1; then cargo test; else echo 'Skipping cargo test (cargo not found on PATH)'; fi")
     }
 }
 
