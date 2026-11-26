@@ -49,7 +49,7 @@ class SystemGatewayServer(
     private val port: Int = 45161,
     private val wakeLockHolder: WakeLockHolder? = null
 ) {
-    internal enum class ExecMode { SHELL, RISH }
+    internal enum class ExecMode { SHELL, RISH, SHIZUKU }
 
     companion object {
         private const val TAG = "SystemGateway"
@@ -185,10 +185,15 @@ class SystemGatewayServer(
                 return when (rawMode.lowercase()) {
                     "shell" -> ExecMode.SHELL
                     "rish" -> ExecMode.RISH
+                    "shizuku" -> ExecMode.SHIZUKU
                     else -> null
                 }
             }
-            return if (json.optBoolean("rish", false)) ExecMode.RISH else ExecMode.SHELL
+            return when {
+                json.optBoolean("shizuku", false) -> ExecMode.SHIZUKU
+                json.optBoolean("rish", false) -> ExecMode.RISH
+                else -> ExecMode.SHELL
+            }
         }
 
         internal fun buildExecEnvironment(
@@ -198,7 +203,9 @@ class SystemGatewayServer(
             packageName: String,
             useRish: Boolean,
             gatewayPort: Int = 45161,
-            gatewayToken: String? = null
+            gatewayToken: String? = null,
+            shizukuEnabled: Boolean = false,
+            shizukuBackend: String = ShizukuBackend.AUTO.id
         ): Map<String, String> {
             val map = linkedMapOf(
                 "HOME" to homePath,
@@ -208,7 +215,9 @@ class SystemGatewayServer(
                 "PATH" to "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin",
                 "AGY_APPLICATION_ID" to packageName,
                 "RISH_APPLICATION_ID" to packageName,
-                "AGY_GATEWAY_PORT" to gatewayPort.toString()
+                "AGY_GATEWAY_PORT" to gatewayPort.toString(),
+                "AGY_SHIZUKU_ENABLED" to if (shizukuEnabled) "1" else "0",
+                "AGY_SHIZUKU_BACKEND" to shizukuBackend
             )
             if (!gatewayToken.isNullOrBlank()) {
                 map["AGY_GATEWAY_TOKEN"] = gatewayToken
@@ -506,6 +515,8 @@ class SystemGatewayServer(
         when (cleanPath) {
             "/gateway/status" -> return handleStatus()
 
+            "/gateway/shizuku" -> return ShizukuManager.buildStatusJson(context)
+
             "/gateway/logs" -> {
                 val tail = query["tail"]?.toIntOrNull() ?: 50
                 return JSONObject()
@@ -569,6 +580,7 @@ class SystemGatewayServer(
             "vibrate" -> handleVibrate(json)
             "exec" -> handleExec(json)
             "status" -> handleStatus()
+            "shizuku" -> ShizukuManager.buildStatusJson(context)
             "logs" -> JSONObject()
                 .put("ok", true)
                 .put("logs", AppLogger.getRecentJson(json.optInt("tail", 50)))
@@ -591,12 +603,20 @@ class SystemGatewayServer(
         }
     }
 
-    private fun handleStatus(): JSONObject = JSONObject()
-        .put("ok", true)
-        .put("status", "online")
-        .put("port", boundPort)
-        .put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
-        .put("rish_available", RishHelper.isAvailable(context))
+    private fun handleStatus(): JSONObject {
+        val snapshot = ShizukuManager.inspectStatus(context)
+        return JSONObject()
+            .put("ok", true)
+            .put("status", "online")
+            .put("port", boundPort)
+            .put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
+            .put("shizuku_enabled", snapshot.enabled)
+            .put("shizuku_backend", snapshot.backend.id)
+            .put("shizuku_state", snapshot.state.name.lowercase())
+            .put("shizuku_ready", snapshot.isReady)
+            .put("shizuku_uid", snapshot.uid)
+            .put("rish_available", snapshot.enabled && (snapshot.isReady || snapshot.hasRishDex))
+    }
 
     private fun handleToast(json: JSONObject): JSONObject {
         val msg = json.optString("message", json.optString("text", "Antigravity"))
@@ -754,13 +774,90 @@ class SystemGatewayServer(
         val execMode = resolveExecMode(json)
             ?: return JSONObject()
                 .put("ok", false)
-                .put("error", "invalid mode: '${json.optString("mode")}' (supported: shell, rish)")
-        val useRish = execMode == ExecMode.RISH
+                .put("error", "invalid mode: '${json.optString("mode")}' (supported: shell, rish, shizuku)")
         val timeoutMs = json.optLong("timeout_ms", 30_000L).coerceIn(1_000L, 120_000L)
         val source = json.optString("source", "agent")
         val homeDir = File(context.filesDir, "home").apply { mkdirs() }
         val cwdPath = json.optString("cwd", homeDir.absolutePath)
+        val shizukuSettings = ShizukuConfig.load(context)
 
+        if (execMode == ExecMode.RISH || execMode == ExecMode.SHIZUKU) {
+            if (!shizukuSettings.enabled) {
+                return JSONObject()
+                    .put("ok", false)
+                    .put("error", "Shizuku is disabled in Settings -> Customizations")
+                    .put("shizuku_enabled", false)
+                    .put("shizuku_ready", false)
+                    .put("rish_available", false)
+            }
+
+            val privResult = ShizukuManager.executePrivileged(
+                context = context,
+                cmd = cmd,
+                timeoutMs = timeoutMs,
+                requestedViaRish = (execMode == ExecMode.RISH),
+                cwdPath = cwdPath,
+                gatewayPort = boundPort,
+                gatewayToken = ensureGatewayToken(context.filesDir)
+            )
+            if (privResult.status == "UNAVAILABLE") {
+                if (shizukuSettings.fallbackToShell) {
+                    val shellRes = executeShellCommand(
+                        cmd = cmd,
+                        timeoutMs = timeoutMs,
+                        source = source,
+                        cwdPath = cwdPath,
+                        shizukuSettings = shizukuSettings
+                    )
+                    return shellRes
+                        .put("fallback_used", true)
+                        .put("shizuku_fallback_reason", privResult.error ?: "Shizuku unavailable")
+                        .put("transport", "shell_fallback")
+                }
+                return JSONObject()
+                    .put("ok", false)
+                    .put("error", privResult.error ?: "Shizuku service unavailable")
+                    .put("shizuku_enabled", true)
+                    .put("shizuku_ready", false)
+                    .put("rish_available", false)
+            }
+
+            val record = CommandRecord(
+                id = "cmd_${System.currentTimeMillis()}_${UUID.randomUUID().toString().substring(0, 4)}",
+                timestamp = System.currentTimeMillis() - privResult.durationMs,
+                cmd = cmd,
+                rish = true,
+                exitCode = privResult.exitCode,
+                durationMs = privResult.durationMs,
+                stdout = privResult.stdout,
+                stderr = privResult.stderr,
+                status = privResult.status,
+                source = source
+            )
+            recordCommand(record)
+            return record.toJson()
+                .put("ok", privResult.ok)
+                .put("transport", privResult.transport)
+                .put("uid", privResult.uid)
+        }
+
+        return executeShellCommand(
+            cmd = cmd,
+            timeoutMs = timeoutMs,
+            source = source,
+            cwdPath = cwdPath,
+            shizukuSettings = shizukuSettings
+        ).put("transport", "shell")
+    }
+
+    private fun executeShellCommand(
+        cmd: String,
+        timeoutMs: Long,
+        source: String,
+        cwdPath: String,
+        shizukuSettings: ShizukuSettings
+    ): JSONObject {
+        val homeDir = File(context.filesDir, "home").apply { mkdirs() }
         val cmdId = "cmd_${System.currentTimeMillis()}_${UUID.randomUUID().toString().substring(0, 4)}"
         val startTime = System.currentTimeMillis()
 
@@ -770,21 +867,9 @@ class SystemGatewayServer(
         var status = "ERROR"
 
         try {
-            val pb = if (useRish) {
-                val rishBin = RishHelper.resolveRishBinary(context)
-                val rishDex = RishHelper.ensureRishDex(context)
-                if (rishBin == null || !rishBin.isFile || rishDex == null) {
-                    return JSONObject()
-                        .put("ok", false)
-                        .put("error", "Shizuku rish unavailable (place rish_shizuku.dex in usr/share/rish or Download)")
-                        .put("rish_available", false)
-                }
-                ProcessBuilder(rishBin.absolutePath, "-c", cmd)
-            } else {
-                val prefixBash = File(context.filesDir, "usr/bin/bash")
-                val shell = if (prefixBash.canExecute()) prefixBash.absolutePath else "/system/bin/sh"
-                ProcessBuilder(shell, "-c", cmd)
-            }
+            val prefixBash = File(context.filesDir, "usr/bin/bash")
+            val shell = if (prefixBash.canExecute()) prefixBash.absolutePath else "/system/bin/sh"
+            val pb = ProcessBuilder(shell, "-c", cmd)
 
             val cwd = File(cwdPath)
             if (cwd.isDirectory) {
@@ -795,18 +880,17 @@ class SystemGatewayServer(
             val tmpDir = File(context.filesDir, "tmp").apply { mkdirs() }
             val env = pb.environment()
             env.remove("LD_PRELOAD")
-            if (useRish) {
-                env.remove("LD_LIBRARY_PATH")
-            }
             env.putAll(
                 buildExecEnvironment(
                     filesPath = filesPath,
                     homePath = homeDir.absolutePath,
                     tmpPath = tmpDir.absolutePath,
                     packageName = context.packageName,
-                    useRish = useRish,
+                    useRish = false,
                     gatewayPort = boundPort,
-                    gatewayToken = ensureGatewayToken(context.filesDir)
+                    gatewayToken = ensureGatewayToken(context.filesDir),
+                    shizukuEnabled = shizukuSettings.enabled,
+                    shizukuBackend = shizukuSettings.backend.id
                 )
             )
 
@@ -838,7 +922,7 @@ class SystemGatewayServer(
             id = cmdId,
             timestamp = startTime,
             cmd = cmd,
-            rish = useRish,
+            rish = false,
             exitCode = exitCode,
             durationMs = durationMs,
             stdout = stdoutBuf.toString().trim(),
@@ -846,14 +930,18 @@ class SystemGatewayServer(
             status = status,
             source = source
         )
+        recordCommand(record)
+
+        return record.toJson().put("ok", status == "SUCCESS")
+    }
+
+    private fun recordCommand(record: CommandRecord) {
         synchronized(historyLock) {
             if (commandHistory.size >= MAX_COMMAND_HISTORY) {
                 commandHistory.removeFirst()
             }
             commandHistory.addLast(record)
         }
-
-        return record.toJson().put("ok", status == "SUCCESS")
     }
 
     private fun drainBoundedStream(input: InputStream, out: StringBuilder) {
@@ -946,8 +1034,14 @@ class SystemGatewayServer(
         result.put("android", Build.VERSION.RELEASE)
         result.put("sdk", Build.VERSION.SDK_INT)
         result.put("model", Build.MODEL)
+        val snapshot = ShizukuManager.inspectStatus(context)
         result.put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
-        result.put("rish_available", RishHelper.isAvailable(context))
+        result.put("shizuku_enabled", snapshot.enabled)
+        result.put("shizuku_backend", snapshot.backend.id)
+        result.put("shizuku_state", snapshot.state.name.lowercase())
+        result.put("shizuku_ready", snapshot.isReady)
+        result.put("shizuku_uid", snapshot.uid)
+        result.put("rish_available", snapshot.enabled && (snapshot.isReady || snapshot.hasRishDex))
         return result
     }
 }

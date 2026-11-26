@@ -3,6 +3,11 @@ package id.vern.antigravity.viewmodel
 import android.content.Context
 import android.widget.Toast
 import id.vern.antigravity.R
+import id.vern.antigravity.executor.AcpSessionPool
+import id.vern.antigravity.gateway.ShizukuBackend
+import id.vern.antigravity.gateway.ShizukuConfig
+import id.vern.antigravity.gateway.ShizukuManager
+import id.vern.antigravity.gateway.ShizukuSettings
 import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.service.McpConfigService
 import id.vern.antigravity.service.McpServerItem
@@ -94,6 +99,15 @@ class SettingsPreferencesDelegate {
     private val mutableEnableCreditOverages = MutableStateFlow(false)
     val enableCreditOverages: StateFlow<Boolean> = mutableEnableCreditOverages.asStateFlow()
 
+    private val mutableShizukuEnabled = MutableStateFlow(false)
+    val shizukuEnabled: StateFlow<Boolean> = mutableShizukuEnabled.asStateFlow()
+
+    private val mutableShizukuBackend = MutableStateFlow(ShizukuBackend.AUTO)
+    val shizukuBackend: StateFlow<ShizukuBackend> = mutableShizukuBackend.asStateFlow()
+
+    private val mutableShizukuFallbackToShell = MutableStateFlow(false)
+    val shizukuFallbackToShell: StateFlow<Boolean> = mutableShizukuFallbackToShell.asStateFlow()
+
     private val mutablePermissionState = MutableStateFlow(PermissionGrantsState())
     val permissionState: StateFlow<PermissionGrantsState> = mutablePermissionState.asStateFlow()
 
@@ -173,6 +187,11 @@ class SettingsPreferencesDelegate {
         mutablePlanReviewPolicy.value = planReview
         mutableBrowserJsPolicy.value = browserJs
         mutableEnableCreditOverages.value = creditOverages
+
+        val shizuku = ShizukuConfig.syncStateFile(context)
+        mutableShizukuEnabled.value = shizuku.enabled
+        mutableShizukuBackend.value = shizuku.backend
+        mutableShizukuFallbackToShell.value = shizuku.fallbackToShell
 
         if (!savedWorkspace.isNullOrBlank() && File(savedWorkspace).exists()) {
             onWorkspaceLoaded(savedWorkspace)
@@ -427,6 +446,43 @@ class SettingsPreferencesDelegate {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_ENABLE_CREDIT_OVERAGES, enabled).apply()
         onLog("Models", "AI credit overages set to: $enabled")
+    }
+
+    fun setShizukuEnabled(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        val updated = ShizukuSettings(
+            enabled = enabled,
+            backend = mutableShizukuBackend.value,
+            fallbackToShell = mutableShizukuFallbackToShell.value
+        )
+        mutableShizukuEnabled.value = enabled
+        ShizukuConfig.save(context, updated)
+        ShizukuManager.onEnabledChanged(context, enabled)
+        AcpSessionPool.invalidate("shizuku_config_changed")
+        onLog("Shizuku", "Shizuku integration ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    fun setShizukuBackend(context: Context, backend: ShizukuBackend, onLog: (String, String) -> Unit) {
+        val updated = ShizukuSettings(
+            enabled = mutableShizukuEnabled.value,
+            backend = backend,
+            fallbackToShell = mutableShizukuFallbackToShell.value
+        )
+        mutableShizukuBackend.value = backend
+        ShizukuConfig.save(context, updated)
+        AcpSessionPool.invalidate("shizuku_config_changed")
+        onLog("Shizuku", "Shizuku execution backend set to: ${backend.id}")
+    }
+
+    fun setShizukuFallbackToShell(context: Context, fallback: Boolean, onLog: (String, String) -> Unit) {
+        val updated = ShizukuSettings(
+            enabled = mutableShizukuEnabled.value,
+            backend = mutableShizukuBackend.value,
+            fallbackToShell = fallback
+        )
+        mutableShizukuFallbackToShell.value = fallback
+        ShizukuConfig.save(context, updated)
+        AcpSessionPool.invalidate("shizuku_config_changed")
+        onLog("Shizuku", "Shizuku offline fallback to normal shell set to: $fallback")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {

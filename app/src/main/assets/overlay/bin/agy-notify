@@ -22,6 +22,16 @@ elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python3)"
 fi
 
+is_shizuku_enabled() {
+    _conf="$FILES_DIR/logs/shizuku.conf"
+    if [ -r "$_conf" ]; then
+        _val="$(sed -n 's/^SHIZUKU_ENABLED=//p' "$_conf" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+        [ "$_val" = "1" ]
+        return $?
+    fi
+    [ "${AGY_SHIZUKU_ENABLED:-0}" = "1" ]
+}
+
 notify_via_gateway() {
     [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ] || return 1
     AGY_NOTIFY_ACTION="$1" \
@@ -130,7 +140,7 @@ if [ "$CMD" = "post" ]; then
         exit 0
     fi
 
-    if [ -x "$RISH_BIN" ]; then
+    if is_shizuku_enabled && [ -x "$RISH_BIN" ]; then
         # Optional high-resolution logo cache with safe fallback to system default icon.
         LOGO_CACHE="/data/local/tmp/agy_logo.png"
         SRC_LOGO=""
@@ -161,12 +171,12 @@ elif [ "$CMD" = "cancel" ]; then
     if notify_via_gateway "cancel" "" "" "$TAG"; then
         exit 0
     fi
-    if [ -x "$RISH_BIN" ]; then
+    if is_shizuku_enabled && [ -x "$RISH_BIN" ]; then
         "$RISH_BIN" -c "cmd notification cancel $(printf %q "$TAG")" 2>/dev/null || true
     fi
 
 elif [ "$CMD" = "list" ]; then
-    if [ -x "$RISH_BIN" ]; then
+    if is_shizuku_enabled && [ -x "$RISH_BIN" ]; then
         "$RISH_BIN" -c "dumpsys notification --noredact" 2>/dev/null | grep -E "pkg=|android.title=|android.text=" | head -n 40
     else
         echo "[agy-notify] rish unavailable to inspect system notification tray"

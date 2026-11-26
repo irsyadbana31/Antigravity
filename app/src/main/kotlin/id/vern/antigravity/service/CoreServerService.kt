@@ -10,6 +10,9 @@ import android.os.IBinder
 import android.util.Log
 import id.vern.antigravity.R
 import id.vern.antigravity.executor.AcpSessionPool
+import id.vern.antigravity.gateway.ShizukuBackend
+import id.vern.antigravity.gateway.ShizukuConfig
+import id.vern.antigravity.gateway.ShizukuManager
 import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
@@ -53,7 +56,9 @@ class CoreServerService : Service() {
             tmpPath: String,
             packageName: String,
             gatewayPort: Int? = null,
-            gatewayToken: String? = null
+            gatewayToken: String? = null,
+            shizukuEnabled: Boolean = false,
+            shizukuBackend: String = ShizukuBackend.AUTO.id
         ): Map<String, String> {
             val map = linkedMapOf(
                 "PATH" to "$filesPath/usr/bin:$filesPath/engine/bin:/system/bin",
@@ -63,7 +68,9 @@ class CoreServerService : Service() {
                 "TMPDIR" to tmpPath,
                 "AGY_APPLICATION_ID" to packageName,
                 "APPLICATION_ID" to packageName,
-                "RISH_APPLICATION_ID" to packageName
+                "RISH_APPLICATION_ID" to packageName,
+                "AGY_SHIZUKU_ENABLED" to if (shizukuEnabled) "1" else "0",
+                "AGY_SHIZUKU_BACKEND" to shizukuBackend
             )
             if (gatewayPort != null && gatewayPort in 1024..65535) {
                 map["AGY_GATEWAY_PORT"] = gatewayPort.toString()
@@ -91,6 +98,7 @@ class CoreServerService : Service() {
         wakeLockHolder.acquire(this, 15_000L)
 
         OrphanProcessCleaner.killOrphanCoreProcesses(this)
+        ShizukuConfig.syncStateFile(this)
 
         gatewayServer = SystemGatewayServer(this, 45161, wakeLockHolder)
         gatewayServer?.start()
@@ -127,6 +135,7 @@ class CoreServerService : Service() {
         dismissNotification()
         serviceScope.cancel()
         AcpSessionPool.invalidate("service_destroy")
+        ShizukuManager.unbindUserService(this)
         stopBackgroundDaemon()
         gatewayServer?.stop()
         wakeLockHolder.releaseAll()
@@ -156,6 +165,7 @@ class CoreServerService : Service() {
     ): ProcessBuilder {
         val homeDir = File(filesDir, "home").apply { mkdirs() }
         val tmpDir = File(filesDir, "tmp").apply { mkdirs() }
+        val shizuku = ShizukuConfig.load(this)
         return ProcessBuilder(daemonBin.absolutePath, command).apply {
             directory(homeDir)
             redirectErrorStream(true)
@@ -167,7 +177,9 @@ class CoreServerService : Service() {
                     tmpPath = tmpDir.absolutePath,
                     packageName = packageName,
                     gatewayPort = if (includeGatewayCredentials) SystemGatewayServer.readActivePort(filesDir) else null,
-                    gatewayToken = if (includeGatewayCredentials) SystemGatewayServer.ensureGatewayToken(filesDir) else null
+                    gatewayToken = if (includeGatewayCredentials) SystemGatewayServer.ensureGatewayToken(filesDir) else null,
+                    shizukuEnabled = shizuku.enabled,
+                    shizukuBackend = shizuku.backend.id
                 )
             )
         }

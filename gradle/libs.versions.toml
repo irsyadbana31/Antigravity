@@ -29,6 +29,7 @@ composeBom = "2024.09.00"
 accompanist = "0.34.0"
 coil = "2.7.0"
 maplibreAndroid = "11.5.1"
+shizuku = "13.1.5"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -82,6 +83,8 @@ compose-material-icons-extended = { group = "androidx.compose.material", name = 
 accompanist-swiperefresh = { group = "com.google.accompanist", name = "accompanist-swiperefresh", version.ref = "accompanist" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 maplibre-android-sdk = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibreAndroid" }
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

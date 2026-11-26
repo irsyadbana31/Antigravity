@@ -83,6 +83,20 @@ def save_tasks(tasks):
     os.replace(tmp_path, TASKS_FILE)
 
 
+def is_shizuku_enabled():
+    conf_path = os.path.join(FILES_DIR, "logs", "shizuku.conf")
+    if os.path.isfile(conf_path):
+        try:
+            with open(conf_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("SHIZUKU_ENABLED="):
+                        return line.split("=", 1)[1].strip() == "1"
+        except Exception:
+            pass
+    return os.environ.get("AGY_SHIZUKU_ENABLED", "").strip() == "1"
+
+
 def wake_antigravity_app():
     if not AGY_APPLICATION_ID:
         log("Cannot wake app: application id was not supplied or derived from PREFIX")
@@ -93,7 +107,7 @@ def wake_antigravity_app():
         "-c", "android.intent.category.LAUNCHER", "-p", AGY_APPLICATION_ID
     ]
     try:
-        if os.path.isfile(RISH_BIN):
+        if is_shizuku_enabled() and os.path.isfile(RISH_BIN):
             subprocess.run(
                 [RISH_BIN, "-c", " ".join(shlex.quote(part) for part in command)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15

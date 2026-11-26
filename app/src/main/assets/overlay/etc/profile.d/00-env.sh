@@ -27,6 +27,12 @@ if [ -z "${AGY_GATEWAY_TOKEN:-}" ] && [ -r "$_agy_files_dir/logs/gateway.token" 
     AGY_GATEWAY_TOKEN="$(tr -d '[:space:]' < "$_agy_files_dir/logs/gateway.token" 2>/dev/null || true)"
 fi
 [ -n "${AGY_GATEWAY_TOKEN:-}" ] && export AGY_GATEWAY_TOKEN
+if [ -z "${AGY_SHIZUKU_ENABLED:-}" ] && [ -r "$_agy_files_dir/logs/shizuku.conf" ]; then
+    AGY_SHIZUKU_ENABLED="$(sed -n 's/^SHIZUKU_ENABLED=//p' "$_agy_files_dir/logs/shizuku.conf" 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
+    AGY_SHIZUKU_BACKEND="$(sed -n 's/^SHIZUKU_BACKEND=//p' "$_agy_files_dir/logs/shizuku.conf" 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
+fi
+export AGY_SHIZUKU_ENABLED="${AGY_SHIZUKU_ENABLED:-0}"
+export AGY_SHIZUKU_BACKEND="${AGY_SHIZUKU_BACKEND:-auto}"
 unset _agy_files_dir
 export SSL_CERT_FILE="$PREFIX/etc/tls/cert.pem"
 export CURL_CA_BUNDLE="$PREFIX/etc/tls/cert.pem"

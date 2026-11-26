@@ -599,6 +599,10 @@ object BootstrapInstaller {
             if [ -z "${'$'}{AGY_GATEWAY_TOKEN:-}" ] && [ -r "${filesDir.absolutePath}/logs/gateway.token" ]; then
                 export AGY_GATEWAY_TOKEN="${'$'}(tr -d '[:space:]' < "${filesDir.absolutePath}/logs/gateway.token" 2>/dev/null)"
             fi
+            if [ -z "${'$'}{AGY_SHIZUKU_ENABLED:-}" ] && [ -r "${filesDir.absolutePath}/logs/shizuku.conf" ]; then
+                export AGY_SHIZUKU_ENABLED="${'$'}(sed -n 's/^SHIZUKU_ENABLED=//p' "${filesDir.absolutePath}/logs/shizuku.conf" 2>/dev/null | head -n 1)"
+                export AGY_SHIZUKU_BACKEND="${'$'}(sed -n 's/^SHIZUKU_BACKEND=//p' "${filesDir.absolutePath}/logs/shizuku.conf" 2>/dev/null | head -n 1)"
+            fi
             LSE_COMPAT="${libDir.absolutePath}/${LseCompatHelper.LIB_FILENAME}"
             if [ -f "${'$'}LSE_COMPAT" ] && ! grep -qw atomics /proc/cpuinfo 2>/dev/null; then
                 exec "${ldBin.absolutePath}" --library-path "$libraryPath" --preload "${'$'}LSE_COMPAT" "${agyBin.absolutePath}" "${'$'}@"

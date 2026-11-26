@@ -2,6 +2,7 @@ package id.vern.antigravity.executor
 
 import android.content.Context
 import android.util.Log
+import id.vern.antigravity.gateway.ShizukuConfig
 import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.LseCompatHelper
@@ -335,6 +336,10 @@ object AcpSessionPool {
         val appPrefs = context.getSharedPreferences("antigravity_prefs", Context.MODE_PRIVATE)
         val skipPerm = appPrefs.getBoolean("ag_skip_permissions", true)
         hash = 31L * hash + if (skipPerm) 1L else 0L
+        val shizuku = ShizukuConfig.load(context)
+        hash = 31L * hash + if (shizuku.enabled) 1L else 0L
+        hash = 31L * hash + shizuku.backend.id.hashCode().toLong()
+        hash = 31L * hash + if (shizuku.fallbackToShell) 1L else 0L
 
         // Hash content of small config files so mtime-only touches never invalidate a warm daemon
         val trackedConfigs = listOf(
@@ -448,8 +453,11 @@ object AcpSessionPool {
         env["AGY_APPLICATION_ID"] = context.packageName
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+        val shizuku = ShizukuConfig.load(context)
         env["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
         env["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
+        env["AGY_SHIZUKU_ENABLED"] = if (shizuku.enabled) "1" else "0"
+        env["AGY_SHIZUKU_BACKEND"] = shizuku.backend.id
 
         val process = try {
             pb.start()

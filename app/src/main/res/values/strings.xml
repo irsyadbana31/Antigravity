@@ -653,5 +653,50 @@
     <string name="agent_error_notification_title">Antigravity · Error</string>
     <string name="settings_notify_on_completion_title">Notify when finished</string>
     <string name="settings_notify_on_completion_desc">Send a notification when Antigravity finishes responding while in the background or screen is off.</string>
+
+    <string name="shizuku_section_title">System Integration</string>
+    <string name="shizuku_enable_title">Shizuku (ADB Shell)</string>
+    <string name="shizuku_enable_desc_off">Optional privileged shell (uid=2000). Disabled by default so normal coding workflows remain untouched.</string>
+    <string name="shizuku_enable_desc_on">Privileged Android shell enabled for explicit system commands. Normal workspace shell stays unaffected.</string>
+    <string name="shizuku_badge_off">Off</string>
+    <string name="shizuku_badge_ready">Ready</string>
+    <string name="shizuku_badge_permission">Permission</string>
+    <string name="shizuku_badge_stopped">Stopped</string>
+    <string name="shizuku_badge_missing">Missing</string>
+    <string name="shizuku_status_connected_adb">Connected · ADB (uid=%1$d)</string>
+    <string name="shizuku_status_connected_root">Connected · Root (uid=0)</string>
+    <string name="shizuku_status_rish_only">Ready via rish DEX</string>
+    <string name="shizuku_status_permission_required">Permission required</string>
+    <string name="shizuku_status_service_stopped">Shizuku service stopped</string>
+    <string name="shizuku_status_not_installed">Shizuku app not installed</string>
+    <string name="shizuku_active_transport_label">Active transport: %1$s</string>
+    <string name="shizuku_transport_binder">Native Binder</string>
+    <string name="shizuku_transport_rish">rish DEX</string>
+    <string name="shizuku_transport_none">None</string>
+    <string name="shizuku_btn_refresh_status">Refresh Shizuku status</string>
+    <string name="shizuku_btn_grant_permission">Grant Permission</string>
+    <string name="shizuku_btn_open_app">Open Shizuku</string>
+    <string name="shizuku_btn_get_app">Get Shizuku</string>
+    <string name="shizuku_btn_test_connection">Test Connection</string>
+    <string name="shizuku_btn_testing">Testing…</string>
+    <string name="shizuku_backend_title">Execution Backend</string>
+    <string name="shizuku_backend_desc">Auto prefers Native Binder (no DEX needed) and falls back to rish DEX if imported.</string>
+    <string name="shizuku_backend_auto">Auto</string>
+    <string name="shizuku_backend_binder">Binder</string>
+    <string name="shizuku_backend_rish">rish DEX</string>
+    <string name="shizuku_fallback_title">Fallback to normal shell</string>
+    <string name="shizuku_fallback_desc">If Shizuku service is offline, run gateway exec requests in the normal app shell.</string>
+    <string name="shizuku_dex_title">rish_shizuku.dex (Optional)</string>
+    <string name="shizuku_dex_status_imported">Imported (ready for interactive rish TTY)</string>
+    <string name="shizuku_dex_status_not_imported">Not imported (optional for Native Binder)</string>
+    <string name="shizuku_dex_btn_import">Import File</string>
+    <string name="shizuku_dex_btn_scan_download">Scan Download</string>
+    <string name="shizuku_dex_btn_remove">Remove</string>
+    <string name="shizuku_permission_request_unavailable">Start the Shizuku service first before requesting permission.</string>
+    <string name="shizuku_app_not_installed_toast">Shizuku app is not installed on this device.</string>
+    <string name="shizuku_dex_imported_toast">Imported rish_shizuku.dex successfully</string>
+    <string name="shizuku_dex_import_failed_toast">Failed to import DEX: %1$s</string>
+    <string name="shizuku_dex_not_found_download_toast">rish_shizuku.dex not found in Download</string>
+    <string name="shizuku_dex_removed_toast">Removed rish_shizuku.dex</string>
 </resources>
 

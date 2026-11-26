@@ -1,8 +1,25 @@
 #!/system/bin/sh
-# Shizuku shell helper; PREFIX is derived from this installed script when needed.
+# Shizuku shell helper; respects Antigravity Settings -> Customizations toggle.
 BASEDIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
 if [ -z "${PREFIX:-}" ]; then
   PREFIX="$(CDPATH= cd -- "$BASEDIR/.." 2>/dev/null && pwd)"
+fi
+FILES_DIR="${PREFIX%/usr}"
+
+SHIZUKU_CONF="$FILES_DIR/logs/shizuku.conf"
+SHIZUKU_ENABLED="${AGY_SHIZUKU_ENABLED:-0}"
+SHIZUKU_BACKEND="${AGY_SHIZUKU_BACKEND:-auto}"
+if [ -r "$SHIZUKU_CONF" ]; then
+  _conf_en="$(sed -n 's/^SHIZUKU_ENABLED=//p' "$SHIZUKU_CONF" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  _conf_bk="$(sed -n 's/^SHIZUKU_BACKEND=//p' "$SHIZUKU_CONF" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  [ -n "$_conf_en" ] && SHIZUKU_ENABLED="$_conf_en"
+  [ -n "$_conf_bk" ] && SHIZUKU_BACKEND="$_conf_bk"
+  unset _conf_en _conf_bk
+fi
+
+if [ "$SHIZUKU_ENABLED" != "1" ]; then
+  echo "rish: Shizuku is disabled in Antigravity Settings -> Customizations." >&2
+  exit 1
 fi
 
 DEX=""
@@ -13,8 +30,75 @@ for d in "$BASEDIR" "$BASEDIR/../share/rish" "$PREFIX/share/rish" "$PREFIX/../ru
   fi
 done
 
+GATEWAY_PORT="${AGY_GATEWAY_PORT:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.port" 2>/dev/null || true)}"
+GATEWAY_TOKEN="${AGY_GATEWAY_TOKEN:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.token" 2>/dev/null || true)}"
+PYTHON_BIN=""
+if [ -x "$PREFIX/bin/python3" ]; then
+  PYTHON_BIN="$PREFIX/bin/python3"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+fi
+
+if [ "${AGY_RISH_DIRECT:-0}" != "1" ] && [ "$#" -eq 2 ] && [ "$1" = "-c" ] && [ "$SHIZUKU_BACKEND" != "rish" ]; then
+  if [ "$SHIZUKU_BACKEND" = "binder" ] || [ -z "$DEX" ] || { [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ]; }; then
+    if [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ]; then
+      AGY_GW_PORT="$GATEWAY_PORT" AGY_GW_TOKEN="$GATEWAY_TOKEN" "$PYTHON_BIN" - "$2" <<'PYEOF'
+import json, os, sys, urllib.request
+
+cmd = sys.argv[1]
+payload = {"cmd": cmd, "mode": "shizuku", "source": "rish_cli"}
+req = urllib.request.Request(
+    f"http://127.0.0.1:{os.environ['AGY_GW_PORT']}/gateway/exec",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+        "Content-Type": "application/json",
+        "X-AGY-Token": os.environ["AGY_GW_TOKEN"],
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=35) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+except Exception:
+    sys.exit(99)
+
+stdout = data.get("stdout") or ""
+stderr = data.get("stderr") or ""
+error = data.get("error") or ""
+if stdout:
+    sys.stdout.write(stdout + ("\n" if not stdout.endswith("\n") else ""))
+if stderr:
+    sys.stderr.write(stderr + ("\n" if not stderr.endswith("\n") else ""))
+elif error and not data.get("ok"):
+    sys.stderr.write(f"rish: {error}\n")
+
+code = data.get("exit_code")
+if data.get("ok"):
+    sys.exit(0)
+if isinstance(code, int) and code > 0:
+    sys.exit(code)
+sys.exit(1)
+PYEOF
+      _gw_rc=$?
+      if [ "$_gw_rc" -ne 99 ]; then
+        exit "$_gw_rc"
+      fi
+      unset _gw_rc
+    fi
+    if [ "$SHIZUKU_BACKEND" = "binder" ]; then
+      echo "rish: Antigravity Gateway unavailable for Native Binder execution." >&2
+      exit 1
+    fi
+  fi
+fi
+
+if [ "$SHIZUKU_BACKEND" = "binder" ]; then
+  echo "rish: Native Binder backend requires -c \"<command>\"; import rish_shizuku.dex for interactive TTY mode." >&2
+  exit 1
+fi
+
 if [ -z "$DEX" ]; then
-  echo "rish: rish_shizuku.dex not found under $PREFIX or its runtime" >&2
+  echo "rish: rish_shizuku.dex not found; import it in Settings -> Customizations or switch backend to Auto/Binder." >&2
   exit 1
 fi
 
@@ -29,7 +113,6 @@ if [ "$SDK" -ge 34 ]; then
   fi
 fi
 
-# Bridges inject the app id. For manual use, derive it from the app-private prefix.
 RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-${AGY_APPLICATION_ID:-}}"
 if [ -z "$RISH_APPLICATION_ID" ]; then
   _AGY_APP_FILES="${PREFIX%/usr}"

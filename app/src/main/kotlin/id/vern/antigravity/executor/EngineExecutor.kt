@@ -3,6 +3,7 @@ package id.vern.antigravity.executor
 import android.content.Context
 import android.system.Os
 import android.util.Log
+import id.vern.antigravity.gateway.ShizukuConfig
 import id.vern.antigravity.gateway.SystemGatewayServer
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.LseCompatHelper
@@ -42,6 +43,9 @@ object EngineExecutor {
     private fun injectGatewayEnv(env: MutableMap<String, String>, filesDir: File) {
         env["AGY_GATEWAY_PORT"] = SystemGatewayServer.readActivePort(filesDir).toString()
         env["AGY_GATEWAY_TOKEN"] = SystemGatewayServer.ensureGatewayToken(filesDir)
+        val shizuku = ShizukuConfig.readFromFilesDir(filesDir)
+        env["AGY_SHIZUKU_ENABLED"] = if (shizuku.enabled) "1" else "0"
+        env["AGY_SHIZUKU_BACKEND"] = shizuku.backend.id
     }
 
     suspend fun executeCommand(

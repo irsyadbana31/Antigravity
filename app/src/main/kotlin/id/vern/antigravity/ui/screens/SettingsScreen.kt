@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -136,6 +138,9 @@ import id.vern.antigravity.data.ThemePreset
 import id.vern.antigravity.data.ModelAvailability
 import id.vern.antigravity.data.AvailableModelInfo
 import id.vern.antigravity.data.SubscriptionTierType
+import id.vern.antigravity.gateway.ShizukuBackend
+import id.vern.antigravity.gateway.ShizukuConnectionState
+import id.vern.antigravity.gateway.ShizukuStatusSnapshot
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.ui.components.LogViewer
 import id.vern.antigravity.ui.theme.AntigravityGreen
@@ -2135,12 +2140,33 @@ fun CustomizationsSettingsPage(
     val installedRulesList by viewModel.installedRulesList.collectAsStateWithLifecycle()
     val mcpServers by viewModel.mcpServers.collectAsStateWithLifecycle()
     val tokenStats by viewModel.tokenUsageStats.collectAsStateWithLifecycle()
+    val shizukuEnabled by viewModel.shizukuEnabled.collectAsStateWithLifecycle()
+    val shizukuBackend by viewModel.shizukuBackend.collectAsStateWithLifecycle()
+    val shizukuFallbackToShell by viewModel.shizukuFallbackToShell.collectAsStateWithLifecycle()
+    val shizukuStatus by viewModel.shizukuStatus.collectAsStateWithLifecycle()
+    val isTestingShizuku by viewModel.isTestingShizuku.collectAsStateWithLifecycle()
+    val shizukuLastTestOutput by viewModel.shizukuLastTestOutput.collectAsStateWithLifecycle()
+    val shizukuLastTestSuccess by viewModel.shizukuLastTestSuccess.collectAsStateWithLifecycle()
+
+    val rishDexPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importRishDexFromUri(context, uri)
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshRules(context)
         viewModel.refreshSkills(context)
         viewModel.refreshPlugins(context)
         viewModel.refreshMcpServers(context)
+    }
+
+    LaunchedEffect(shizukuEnabled) {
+        if (shizukuEnabled) {
+            viewModel.refreshShizukuStatus(context)
+        }
     }
 
     Column(
@@ -2297,6 +2323,36 @@ fun CustomizationsSettingsPage(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            ShizukuSettingsSection(
+                enabled = shizukuEnabled,
+                backend = shizukuBackend,
+                fallbackToShell = shizukuFallbackToShell,
+                status = shizukuStatus,
+                isTesting = isTestingShizuku,
+                lastTestOutput = shizukuLastTestOutput,
+                lastTestSuccess = shizukuLastTestSuccess,
+                onToggleEnabled = { viewModel.setShizukuEnabled(context, it) },
+                onSelectBackend = { viewModel.setShizukuBackend(context, it) },
+                onToggleFallback = { viewModel.setShizukuFallbackToShell(context, it) },
+                onRefreshStatus = { viewModel.refreshShizukuStatus(context) },
+                onGrantPermission = { viewModel.requestShizukuPermission(context) },
+                onOpenShizuku = { viewModel.openShizukuApp(context) },
+                onGetShizuku = {
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    }
+                },
+                onTestConnection = { viewModel.testShizukuConnection(context) },
+                onImportDexFile = { rishDexPickerLauncher.launch(arrayOf("*/*")) },
+                onScanDexDownloads = { viewModel.scanRishDexFromDownloads(context) },
+                onRemoveDex = { viewModel.clearRishDex(context) }
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -2567,6 +2623,526 @@ fun CustomizationsSettingsPage(
             viewModel = viewModel,
             onDismiss = { showPluginsDialog = false }
         )
+    }
+}
+
+@Composable
+private fun ShizukuSettingsSection(
+    enabled: Boolean,
+    backend: ShizukuBackend,
+    fallbackToShell: Boolean,
+    status: ShizukuStatusSnapshot,
+    isTesting: Boolean,
+    lastTestOutput: String?,
+    lastTestSuccess: Boolean?,
+    onToggleEnabled: (Boolean) -> Unit,
+    onSelectBackend: (ShizukuBackend) -> Unit,
+    onToggleFallback: (Boolean) -> Unit,
+    onRefreshStatus: () -> Unit,
+    onGrantPermission: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onGetShizuku: () -> Unit,
+    onTestConnection: () -> Unit,
+    onImportDexFile: () -> Unit,
+    onScanDexDownloads: () -> Unit,
+    onRemoveDex: () -> Unit
+) {
+    val badgeLabel: String
+    val badgeColor: Color
+    when {
+        !enabled -> {
+            badgeLabel = stringResource(R.string.shizuku_badge_off)
+            badgeColor = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        status.state == ShizukuConnectionState.CONNECTED || status.state == ShizukuConnectionState.RISH_ONLY_READY -> {
+            badgeLabel = stringResource(R.string.shizuku_badge_ready)
+            badgeColor = AntigravityGreen
+        }
+        status.state == ShizukuConnectionState.PERMISSION_REQUIRED -> {
+            badgeLabel = stringResource(R.string.shizuku_badge_permission)
+            badgeColor = AntigravityAmber
+        }
+        status.state == ShizukuConnectionState.NOT_INSTALLED -> {
+            badgeLabel = stringResource(R.string.shizuku_badge_missing)
+            badgeColor = AntigravityRed
+        }
+        else -> {
+            badgeLabel = stringResource(R.string.shizuku_badge_stopped)
+            badgeColor = AntigravityAmber
+        }
+    }
+
+    SettingsSectionTitle(title = stringResource(R.string.shizuku_section_title))
+    SettingsCard {
+        Column(modifier = Modifier.animateContentSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.shizuku_enable_title),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (!enabled) {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            } else {
+                                badgeColor.copy(alpha = 0.16f)
+                            }
+                        ) {
+                            Text(
+                                text = badgeLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = badgeColor,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = stringResource(
+                            if (enabled) R.string.shizuku_enable_desc_on else R.string.shizuku_enable_desc_off
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
+
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggleEnabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+
+            AnimatedVisibility(
+                visible = enabled,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        val statusDetailText = when (status.state) {
+                            ShizukuConnectionState.CONNECTED -> {
+                                if (status.uid == 0) {
+                                    stringResource(R.string.shizuku_status_connected_root)
+                                } else {
+                                    val uidVal = if (status.uid >= 0) status.uid else 2000
+                                    stringResource(R.string.shizuku_status_connected_adb, uidVal)
+                                }
+                            }
+                            ShizukuConnectionState.RISH_ONLY_READY -> stringResource(R.string.shizuku_status_rish_only)
+                            ShizukuConnectionState.PERMISSION_REQUIRED -> stringResource(R.string.shizuku_status_permission_required)
+                            ShizukuConnectionState.NOT_INSTALLED -> stringResource(R.string.shizuku_status_not_installed)
+                            ShizukuConnectionState.SERVICE_STOPPED -> stringResource(R.string.shizuku_status_service_stopped)
+                            ShizukuConnectionState.DISABLED -> stringResource(R.string.shizuku_badge_off)
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(badgeColor)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = statusDetailText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (status.isReady) {
+                                        val transportLabel = when (status.activeTransport) {
+                                            "binder" -> stringResource(R.string.shizuku_transport_binder)
+                                            "rish" -> stringResource(R.string.shizuku_transport_rish)
+                                            else -> stringResource(R.string.shizuku_transport_none)
+                                        }
+                                        Text(
+                                            text = stringResource(R.string.shizuku_active_transport_label, transportLabel),
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            IconButton(
+                                onClick = onRefreshStatus,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = stringResource(R.string.shizuku_btn_refresh_status),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            when (status.state) {
+                                ShizukuConnectionState.NOT_INSTALLED -> {
+                                    Button(
+                                        onClick = onGetShizuku,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.shizuku_btn_get_app),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                ShizukuConnectionState.SERVICE_STOPPED -> {
+                                    Button(
+                                        onClick = onOpenShizuku,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.shizuku_btn_open_app),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                ShizukuConnectionState.PERMISSION_REQUIRED -> {
+                                    Button(
+                                        onClick = onGrantPermission,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.shizuku_btn_grant_permission),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = onOpenShizuku,
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.shizuku_btn_open_app),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                ShizukuConnectionState.CONNECTED,
+                                ShizukuConnectionState.RISH_ONLY_READY -> {
+                                    Button(
+                                        onClick = onTestConnection,
+                                        enabled = !isTesting,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        if (isTesting) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = stringResource(
+                                                if (isTesting) R.string.shizuku_btn_testing else R.string.shizuku_btn_test_connection
+                                            ),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (status.appInstalled) {
+                                        OutlinedButton(
+                                            onClick = onOpenShizuku,
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.shizuku_btn_open_app),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                                ShizukuConnectionState.DISABLED -> Unit
+                            }
+                        }
+
+                        if (!lastTestOutput.isNullOrBlank()) {
+                            val ok = lastTestSuccess == true
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (ok) {
+                                    AntigravityGreen.copy(alpha = 0.12f)
+                                } else {
+                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (ok) AntigravityGreen.copy(alpha = 0.45f) else MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lastTestOutput,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (ok) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.shizuku_backend_title),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.shizuku_backend_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(2.dp)
+                        ) {
+                            val backendOptions = listOf(
+                                Pair(ShizukuBackend.AUTO, R.string.shizuku_backend_auto),
+                                Pair(ShizukuBackend.BINDER, R.string.shizuku_backend_binder),
+                                Pair(ShizukuBackend.RISH, R.string.shizuku_backend_rish)
+                            )
+                            backendOptions.forEach { (opt, labelRes) ->
+                                val selected = backend == opt
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { onSelectBackend(opt) }
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = stringResource(labelRes),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.shizuku_fallback_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = stringResource(R.string.shizuku_fallback_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = fallbackToShell,
+                            onCheckedChange = onToggleFallback,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.shizuku_dex_title),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = stringResource(
+                                        if (status.hasRishDex) R.string.shizuku_dex_status_imported
+                                        else R.string.shizuku_dex_status_not_imported
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onImportDexFile,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.shizuku_dex_btn_import),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onScanDexDownloads,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.shizuku_dex_btn_scan_download),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (status.hasRishDex) {
+                                OutlinedButton(
+                                    onClick = onRemoveDex,
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.shizuku_dex_btn_remove),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

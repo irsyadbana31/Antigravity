@@ -91,6 +91,22 @@ class SystemGatewayServerTest {
             SystemGatewayServer.ExecMode.RISH,
             SystemGatewayServer.resolveExecMode(JSONObject().put("rish", true))
         )
+        assertEquals(
+            SystemGatewayServer.ExecMode.SHIZUKU,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "shizuku"))
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.SHIZUKU,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "SHIZUKU"))
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.SHIZUKU,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("shizuku", true))
+        )
+        assertEquals(
+            SystemGatewayServer.ExecMode.RISH,
+            SystemGatewayServer.resolveExecMode(JSONObject().put("shizuku", false).put("rish", true))
+        )
         assertNull(
             SystemGatewayServer.resolveExecMode(JSONObject().put("mode", "invalid_mode"))
         )
@@ -116,15 +132,21 @@ class SystemGatewayServerTest {
         assertEquals("xterm-256color", shellEnv["TERM"])
         assertEquals("45162", shellEnv["AGY_GATEWAY_PORT"])
         assertEquals("tok123", shellEnv["AGY_GATEWAY_TOKEN"])
+        assertEquals("0", shellEnv["AGY_SHIZUKU_ENABLED"])
+        assertEquals("auto", shellEnv["AGY_SHIZUKU_BACKEND"])
 
         val rishEnv = SystemGatewayServer.buildExecEnvironment(
             filesPath = "/data/user/0/id.vern.antigravity.turbo/files",
             homePath = "/data/user/0/id.vern.antigravity.turbo/files/home",
             tmpPath = "/data/user/0/id.vern.antigravity.turbo/files/tmp",
             packageName = "id.vern.antigravity.turbo",
-            useRish = true
+            useRish = true,
+            shizukuEnabled = true,
+            shizukuBackend = "binder"
         )
         assertFalse(rishEnv.containsKey("LD_LIBRARY_PATH"))
         assertEquals("id.vern.antigravity.turbo", rishEnv["RISH_APPLICATION_ID"])
+        assertEquals("1", rishEnv["AGY_SHIZUKU_ENABLED"])
+        assertEquals("binder", rishEnv["AGY_SHIZUKU_BACKEND"])
     }
 }

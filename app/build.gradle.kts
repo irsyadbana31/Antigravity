@@ -29,8 +29,8 @@ android {
         // Must remain 28: Android 10+ (targetSdk >= 29) enforces SELinux execute_no_trans W^X,
         // blocking execve() on agy/node/python3 binaries inside app filesDir.
         targetSdk = 28
-        versionCode = 12
-        versionName = "1.2.0-turbo"
+        versionCode = 13
+        versionName = "1.2.1-turbo"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -52,6 +52,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
 
     androidResources {
@@ -156,6 +157,8 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

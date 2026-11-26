@@ -61,6 +61,10 @@ import id.vern.antigravity.service.TerminalLine
 import id.vern.antigravity.service.TerminalSessionManager
 import id.vern.antigravity.executor.AcpStreamEvent
 import id.vern.antigravity.executor.EngineExecutor
+import id.vern.antigravity.gateway.RishHelper
+import id.vern.antigravity.gateway.ShizukuBackend
+import id.vern.antigravity.gateway.ShizukuManager
+import id.vern.antigravity.gateway.ShizukuStatusSnapshot
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.CoreUpdateManager
 import id.vern.antigravity.install.CoreUpdateInfo
@@ -284,6 +288,21 @@ class AntigravityViewModel : ViewModel() {
     val planReviewPolicy: StateFlow<String> = settingsPreferencesDelegate.planReviewPolicy
     val browserJsPolicy: StateFlow<String> = settingsPreferencesDelegate.browserJsPolicy
     val enableCreditOverages: StateFlow<Boolean> = settingsPreferencesDelegate.enableCreditOverages
+    val shizukuEnabled: StateFlow<Boolean> = settingsPreferencesDelegate.shizukuEnabled
+    val shizukuBackend: StateFlow<ShizukuBackend> = settingsPreferencesDelegate.shizukuBackend
+    val shizukuFallbackToShell: StateFlow<Boolean> = settingsPreferencesDelegate.shizukuFallbackToShell
+
+    private val mutableShizukuStatus = MutableStateFlow(ShizukuStatusSnapshot())
+    val shizukuStatus: StateFlow<ShizukuStatusSnapshot> = mutableShizukuStatus.asStateFlow()
+
+    private val mutableIsTestingShizuku = MutableStateFlow(false)
+    val isTestingShizuku: StateFlow<Boolean> = mutableIsTestingShizuku.asStateFlow()
+
+    private val mutableShizukuLastTestOutput = MutableStateFlow<String?>(null)
+    val shizukuLastTestOutput: StateFlow<String?> = mutableShizukuLastTestOutput.asStateFlow()
+
+    private val mutableShizukuLastTestSuccess = MutableStateFlow<Boolean?>(null)
+    val shizukuLastTestSuccess: StateFlow<Boolean?> = mutableShizukuLastTestSuccess.asStateFlow()
     val permissionState: StateFlow<PermissionGrantsState> = settingsPreferencesDelegate.permissionState
     val installedRulesList: StateFlow<List<RuleItem>> = settingsPreferencesDelegate.installedRulesList
     val mcpServers: StateFlow<List<McpServerItem>> = settingsPreferencesDelegate.mcpServers
@@ -608,6 +627,9 @@ class AntigravityViewModel : ViewModel() {
         refreshMcpServers(context)
         loadProjects(context)
         loadConversationHistory(context)
+        if (shizukuEnabled.value) {
+            refreshShizukuStatus(context)
+        }
     }
 
     fun setModel(context: Context, model: String, budget: String = thinkingBudget.value, cliId: String? = null) =
@@ -663,6 +685,166 @@ class AntigravityViewModel : ViewModel() {
 
     fun setEnableCreditOverages(context: Context, enabled: Boolean) =
         settingsPreferencesDelegate.setEnableCreditOverages(context, enabled, ::addLog)
+
+    fun setShizukuEnabled(context: Context, enabled: Boolean) {
+        settingsPreferencesDelegate.setShizukuEnabled(context, enabled, ::addLog)
+        if (!enabled) {
+            mutableShizukuLastTestOutput.value = null
+            mutableShizukuLastTestSuccess.value = null
+            mutableIsTestingShizuku.value = false
+            mutableShizukuStatus.value = ShizukuStatusSnapshot(
+                enabled = false,
+                backend = shizukuBackend.value,
+                fallbackToShell = shizukuFallbackToShell.value
+            )
+        } else {
+            refreshShizukuStatus(context)
+        }
+    }
+
+    fun setShizukuBackend(context: Context, backend: ShizukuBackend) {
+        settingsPreferencesDelegate.setShizukuBackend(context, backend, ::addLog)
+        mutableShizukuLastTestOutput.value = null
+        mutableShizukuLastTestSuccess.value = null
+        refreshShizukuStatus(context)
+    }
+
+    fun setShizukuFallbackToShell(context: Context, fallback: Boolean) {
+        settingsPreferencesDelegate.setShizukuFallbackToShell(context, fallback, ::addLog)
+        refreshShizukuStatus(context)
+    }
+
+    fun refreshShizukuStatus(context: Context) {
+        val appContext = context.applicationContext
+        if (!shizukuEnabled.value) {
+            mutableShizukuStatus.value = ShizukuStatusSnapshot(
+                enabled = false,
+                backend = shizukuBackend.value,
+                fallbackToShell = shizukuFallbackToShell.value
+            )
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshot = ShizukuManager.inspectStatus(appContext) {
+                refreshShizukuStatus(appContext)
+            }
+            mutableShizukuStatus.value = snapshot
+        }
+    }
+
+    fun requestShizukuPermission(context: Context) {
+        if (!shizukuEnabled.value) return
+        val requested = ShizukuManager.requestPermission(context)
+        if (!requested) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.shizuku_permission_request_unavailable),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        refreshShizukuStatus(context)
+    }
+
+    fun openShizukuApp(context: Context) {
+        if (!ShizukuManager.openShizukuApp(context)) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.shizuku_app_not_installed_toast),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    fun testShizukuConnection(context: Context) {
+        if (!shizukuEnabled.value || mutableIsTestingShizuku.value) return
+        val appContext = context.applicationContext
+        viewModelScope.launch {
+            mutableIsTestingShizuku.value = true
+            val result = withContext(Dispatchers.IO) {
+                ShizukuManager.testConnection(appContext)
+            }
+            mutableIsTestingShizuku.value = false
+            mutableShizukuLastTestSuccess.value = result.ok
+            val outputText = when {
+                result.ok && result.stdout.isNotBlank() ->
+                    "${result.stdout} (${result.transport}, ${result.durationMs}ms)"
+                result.ok ->
+                    "OK (${result.transport}, ${result.durationMs}ms)"
+                else ->
+                    (result.error ?: result.stderr).ifBlank { "Exit ${result.exitCode}" } +
+                        " (${result.transport}, ${result.durationMs}ms)"
+            }
+            mutableShizukuLastTestOutput.value = outputText
+            addLog("Shizuku", "Test connection [${result.status}]: $outputText", isError = !result.ok)
+            refreshShizukuStatus(appContext)
+        }
+    }
+
+    fun importRishDexFromUri(context: Context, uri: Uri) {
+        val appContext = context.applicationContext
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.IO) {
+                RishHelper.importRishDexFromUri(appContext, uri)
+            }
+            if (res.isSuccess) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.shizuku_dex_imported_toast),
+                    Toast.LENGTH_SHORT
+                ).show()
+                addLog("Shizuku", "Imported rish_shizuku.dex via file picker")
+            } else {
+                val msg = res.exceptionOrNull()?.message ?: "Invalid file"
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.shizuku_dex_import_failed_toast, msg),
+                    Toast.LENGTH_SHORT
+                ).show()
+                addLog("Shizuku", "Failed importing rish_shizuku.dex: $msg", isError = true)
+            }
+            refreshShizukuStatus(appContext)
+        }
+    }
+
+    fun scanRishDexFromDownloads(context: Context) {
+        val appContext = context.applicationContext
+        viewModelScope.launch {
+            val imported = withContext(Dispatchers.IO) {
+                RishHelper.importRishDexFromDownloads(appContext)
+            }
+            if (imported != null) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.shizuku_dex_imported_toast),
+                    Toast.LENGTH_SHORT
+                ).show()
+                addLog("Shizuku", "Imported rish_shizuku.dex from Download")
+            } else {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.shizuku_dex_not_found_download_toast),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            refreshShizukuStatus(appContext)
+        }
+    }
+
+    fun clearRishDex(context: Context) {
+        val appContext = context.applicationContext
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                RishHelper.clearRishDex(appContext)
+            }
+            Toast.makeText(
+                context,
+                context.getString(R.string.shizuku_dex_removed_toast),
+                Toast.LENGTH_SHORT
+            ).show()
+            addLog("Shizuku", "Removed imported rish_shizuku.dex")
+            refreshShizukuStatus(appContext)
+        }
+    }
 
     fun refreshPermissions(context: Context) =
         settingsPreferencesDelegate.refreshPermissions(context, viewModelScope)
@@ -756,7 +938,7 @@ class AntigravityViewModel : ViewModel() {
             onLog = ::addLog
         )
 
-    fun onActivityResume(context: Context) =
+    fun onActivityResume(context: Context) {
         authDelegate.onActivityResume(
             context = context,
             scope = viewModelScope,
@@ -776,6 +958,10 @@ class AntigravityViewModel : ViewModel() {
                 refreshCliModels(context, force = true)
             }
         )
+        if (shizukuEnabled.value) {
+            refreshShizukuStatus(context)
+        }
+    }
 
     fun exchangeManualAuthCode(context: Context, rawCodeOrToken: String) =
         authDelegate.exchangeManualAuthCode(
