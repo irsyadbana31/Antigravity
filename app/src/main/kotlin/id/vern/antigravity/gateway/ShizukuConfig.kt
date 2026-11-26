@@ -37,6 +37,8 @@ object ShizukuConfig {
 
     private val confLock = Any()
 
+    fun isAuxiliaryUid(uid: Int): Boolean = uid == 2000 || uid == 0
+
     fun formatConf(settings: ShizukuSettings): String {
         val enabledFlag = if (settings.enabled) "1" else "0"
         val fallbackFlag = if (settings.fallbackToShell) "1" else "0"

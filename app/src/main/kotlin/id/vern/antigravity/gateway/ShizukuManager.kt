@@ -6,9 +6,11 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import id.vern.antigravity.BuildConfig
 import id.vern.antigravity.shizuku.IShizukuShellService
+import moe.shizuku.server.IShizukuService
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
@@ -271,10 +273,13 @@ object ShizukuManager {
         }
     }
 
+    internal fun isAuxiliaryUid(uid: Int): Boolean = ShizukuConfig.isAuxiliaryUid(uid)
+
     private fun buildUserServiceArgs(context: Context): Shizuku.UserServiceArgs {
         return Shizuku.UserServiceArgs(
             ComponentName(context.packageName, ShizukuShellUserService::class.java.name)
         )
+            .tag("shizuku_shell")
             .daemon(false)
             .processNameSuffix("shizuku_shell")
             .debuggable(BuildConfig.DEBUG)
@@ -418,13 +423,15 @@ object ShizukuManager {
                 )
             }
             ShizukuBackend.AUTO -> {
+                var binderFailure: ShizukuExecResult? = null
                 if (binderReady) {
                     val binderResult = executeViaBinder(context, cmd, timeoutMs)
                     if (binderResult.status != "UNAVAILABLE") {
                         return binderResult
                     }
+                    binderFailure = binderResult
                 }
-                if (snapshot.hasRishDex || requestedViaRish && RishHelper.isAvailable(context)) {
+                if (snapshot.hasRishDex || (requestedViaRish && RishHelper.isAvailable(context))) {
                     executeViaRish(
                         context = context,
                         cmd = cmd,
@@ -435,7 +442,7 @@ object ShizukuManager {
                         backendId = settings.backend.id
                     )
                 } else {
-                    unavailableResult(snapshot, "none")
+                    binderFailure ?: unavailableResult(snapshot, "none")
                 }
             }
         }
@@ -461,18 +468,154 @@ object ShizukuManager {
         )
     }
 
-    private fun executeViaBinder(context: Context, cmd: String, timeoutMs: Long): ShizukuExecResult {
-        val service = bindAndGetShellService(context)
-            ?: return ShizukuExecResult(
+    private fun executeViaDirectRemoteProcess(cmd: String, timeoutMs: Long): ShizukuExecResult {
+        val startMs = System.currentTimeMillis()
+        val rawBinder = runCatching { Shizuku.getBinder() }.getOrNull()
+        if (rawBinder == null || !runCatching { rawBinder.pingBinder() }.getOrDefault(false)) {
+            return ShizukuExecResult(
                 ok = false,
                 exitCode = -1,
                 stdout = "",
                 stderr = "",
-                durationMs = 0L,
+                durationMs = System.currentTimeMillis() - startMs,
                 status = "UNAVAILABLE",
                 transport = "binder",
-                error = "Failed binding Shizuku shell service"
+                error = "Direct Shizuku binder not alive"
             )
+        }
+
+        val clampedTimeout = timeoutMs.coerceIn(1_000L, 120_000L)
+        val stdoutBuf = StringBuilder()
+        val stderrBuf = StringBuilder()
+        var exitCode = -1
+        var status = "ERROR"
+        val uid = runCatching { Shizuku.getUid() }.getOrDefault(-1)
+
+        try {
+            val service = IShizukuService.Stub.asInterface(rawBinder)
+                ?: return ShizukuExecResult(
+                    ok = false,
+                    exitCode = -1,
+                    stdout = "",
+                    stderr = "",
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = "UNAVAILABLE",
+                    transport = "binder",
+                    error = "IShizukuService interface unavailable"
+                )
+            val remoteProc = service.newProcess(arrayOf("/system/bin/sh", "-c", cmd), null, null)
+                ?: return ShizukuExecResult(
+                    ok = false,
+                    exitCode = -1,
+                    stdout = "",
+                    stderr = "",
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = "UNAVAILABLE",
+                    transport = "binder",
+                    error = "IShizukuService.newProcess returned null"
+                )
+
+            runCatching { remoteProc.outputStream?.close() }
+            val inPfd = runCatching { remoteProc.inputStream }.getOrNull()
+            val errPfd = runCatching { remoteProc.errorStream }.getOrNull()
+
+            val outThread = inPfd?.let { pfd ->
+                Thread({
+                    drainBounded(ParcelFileDescriptor.AutoCloseInputStream(pfd), stdoutBuf)
+                }, "ShizukuDirectOut").apply {
+                    isDaemon = true
+                    start()
+                }
+            }
+            val errThread = errPfd?.let { pfd ->
+                Thread({
+                    drainBounded(ParcelFileDescriptor.AutoCloseInputStream(pfd), stderrBuf)
+                }, "ShizukuDirectErr").apply {
+                    isDaemon = true
+                    start()
+                }
+            }
+
+            val finished = try {
+                remoteProc.waitForTimeout(clampedTimeout, TimeUnit.MILLISECONDS.name)
+            } catch (_: Throwable) {
+                remoteProc.waitFor()
+                true
+            }
+
+            if (finished) {
+                exitCode = runCatching { remoteProc.exitValue() }.getOrDefault(-1)
+                try { outThread?.join(500) } catch (_: InterruptedException) {}
+                try { errThread?.join(500) } catch (_: InterruptedException) {}
+                status = if (exitCode == 0) "SUCCESS" else "FAILED"
+            } else {
+                runCatching { remoteProc.destroy() }
+                try { outThread?.join(250) } catch (_: InterruptedException) {}
+                try { errThread?.join(250) } catch (_: InterruptedException) {}
+                status = "TIMEOUT"
+                if (stderrBuf.isNotEmpty()) stderrBuf.append("\n")
+                stderrBuf.append("[Process timed out after ${clampedTimeout}ms]")
+            }
+            runCatching { remoteProc.destroy() }
+        } catch (t: Throwable) {
+            val msg = t.message ?: t.javaClass.simpleName
+            Log.w(TAG, "Direct Shizuku newProcess failed: $msg")
+            return ShizukuExecResult(
+                ok = false,
+                exitCode = -1,
+                stdout = "",
+                stderr = "",
+                durationMs = System.currentTimeMillis() - startMs,
+                status = "UNAVAILABLE",
+                transport = "binder",
+                error = "Direct Shizuku exec failed: $msg",
+                uid = uid
+            )
+        }
+
+        val durationMs = System.currentTimeMillis() - startMs
+        val stdout = stdoutBuf.toString().trim()
+        val stderr = stderrBuf.toString().trim()
+        return ShizukuExecResult(
+            ok = status == "SUCCESS",
+            exitCode = exitCode,
+            stdout = stdout,
+            stderr = stderr,
+            durationMs = durationMs,
+            status = status,
+            transport = "binder",
+            error = if (status == "SUCCESS") null else stderr.ifBlank { status },
+            uid = uid
+        )
+    }
+
+    private fun executeViaBinder(context: Context, cmd: String, timeoutMs: Long): ShizukuExecResult {
+        val directResult = executeViaDirectRemoteProcess(cmd, timeoutMs)
+        if (directResult.status != "UNAVAILABLE") {
+            return directResult
+        }
+
+        val fallbackStartMs = System.currentTimeMillis()
+        val service = bindAndGetShellService(context, timeoutMs = 8_000L)
+        if (service == null) {
+            val totalMs = directResult.durationMs + (System.currentTimeMillis() - fallbackStartMs)
+            val directErr = directResult.error?.takeIf { it.isNotBlank() }
+            val combinedError = if (directErr != null) {
+                "$directErr; UserService bind timed out"
+            } else {
+                "Failed binding Shizuku shell service"
+            }
+            return ShizukuExecResult(
+                ok = false,
+                exitCode = -1,
+                stdout = "",
+                stderr = "",
+                durationMs = totalMs,
+                status = "UNAVAILABLE",
+                transport = "binder",
+                error = combinedError
+            )
+        }
         return try {
             val rawJson = service.execCommand(cmd, timeoutMs, MAX_OUTPUT_BYTES)
             val obj = JSONObject(rawJson)
@@ -501,7 +644,7 @@ object ShizukuManager {
                 exitCode = -1,
                 stdout = "",
                 stderr = e.message ?: "Binder execution error",
-                durationMs = 0L,
+                durationMs = System.currentTimeMillis() - fallbackStartMs,
                 status = "ERROR",
                 transport = "binder",
                 error = e.message ?: "Binder execution error"

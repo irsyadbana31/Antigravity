@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Process
 import android.util.Log
+import id.vern.antigravity.gateway.ShizukuConfig
 import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.ui.CrashHandlerActivity
 import id.vern.antigravity.util.StorageMaintenance
@@ -27,22 +28,28 @@ class AntigravityApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        setupCrashHandler()
-        if (!isCrashHandlerProcess()) {
-            StorageMaintenance.scheduleStartupCleanup(this)
-            Log.i(TAG, "Turbo native engine: ${RustTurboBridge.statusSummary()}")
+        if (isAuxiliaryProcess()) {
+            return
         }
+        setupCrashHandler()
+        StorageMaintenance.scheduleStartupCleanup(this)
+        Log.i(TAG, "Turbo native engine: ${RustTurboBridge.statusSummary()}")
         Log.i(TAG, "Antigravity App initialized with crash handler.")
     }
 
-    private fun isCrashHandlerProcess(): Boolean {
+    private fun isAuxiliaryProcess(): Boolean {
+        if (ShizukuConfig.isAuxiliaryUid(Process.myUid())) return true
+        val processName = currentProcessName()
+        return processName.endsWith(":crash_handler") || processName.endsWith(":shizuku_shell")
+    }
+
+    private fun currentProcessName(): String {
         return try {
             val pid = Process.myPid()
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val processName = am.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName ?: ""
-            processName.endsWith(":crash_handler")
-        } catch (e: Exception) {
-            false
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            am?.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName ?: ""
+        } catch (_: Exception) {
+            ""
         }
     }
 

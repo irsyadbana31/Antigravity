@@ -81,4 +81,12 @@ class ShizukuConfigTest {
         ShizukuConfig.writeToFilesDir(filesDir, disabled)
         assertEquals(disabled, ShizukuConfig.readFromFilesDir(filesDir))
     }
+
+    @Test
+    fun isAuxiliaryUid_detectsShellAndRootUidsOnly() {
+        assertTrue(ShizukuConfig.isAuxiliaryUid(2000))
+        assertTrue(ShizukuConfig.isAuxiliaryUid(0))
+        assertFalse(ShizukuConfig.isAuxiliaryUid(10148))
+        assertFalse(ShizukuConfig.isAuxiliaryUid(-1))
+    }
 }
