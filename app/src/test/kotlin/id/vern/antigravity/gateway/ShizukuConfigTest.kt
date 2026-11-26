@@ -135,9 +135,14 @@ class ShizukuConfigTest {
         assertTrue(content.startsWith("#!/system/bin/sh"))
         assertTrue(content.contains("TMPDIR="))
         assertTrue(content.contains("export "))
-        listOf("\"status\"", "\"diag\"", "\"anr\"", "\"logcat\"", "\"install\"", "\"pkg\"", "\"exec\"").forEach { sub ->
+        listOf("\"status\"", "\"diag\"", "\"anr\"", "\"logcat\"", "\"install\"", "\"pkg\"", "\"ui\"", "\"exec\"").forEach { sub ->
             assertTrue("Missing subcommand $sub", content.contains(sub))
         }
+        listOf("\"top\"", "\"open\"", "\"dump\"", "\"find\"", "\"tap\"", "\"swipe\"", "\"scroll\"", "\"text\"", "\"key\"", "\"screen\"", "\"return\"").forEach { act ->
+            assertTrue("Missing ui action $act", content.contains(act))
+        }
+        assertTrue(content.contains("--expect-pkg"))
+        assertTrue(content.contains("--allow-self"))
         assertFalse(content.contains("exec env"))
     }
 }

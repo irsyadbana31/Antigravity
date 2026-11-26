@@ -99,10 +99,12 @@ import os
 import re
 import shlex
 import shutil
+import struct
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 DEFAULT_PKG = "id.vern.antigravity.turbo"
 DEFAULT_COMPONENT = "id.vern.antigravity.turbo/id.vern.antigravity.ui.MainActivity"
@@ -124,6 +126,8 @@ Commands:
   pkg <action> [arg]                  Manage packages via pm/am/dumpsys:
       Actions: list [-3|-s], info <pkg>, path <pkg>, clear <pkg>,
                force-stop <pkg>, enable <pkg>, disable <pkg>
+  ui <action> [args]                  Operate Android UI safely via Shizuku (uid=2000):
+      Actions: top, open, dump, find, tap, swipe, scroll, text, key, screen, return
   exec <command...>                   Execute a privileged shell command via uid=2000"""
     )
 
@@ -536,6 +540,495 @@ def cmd_pkg(args):
     return 0 if res.get("ok") else 1
 
 
+UI_KEY_MAP = {
+    "back": 4,
+    "home": 3,
+    "enter": 66,
+    "recents": 187,
+    "tab": 61,
+    "del": 67,
+    "escape": 111,
+    "media_play_pause": 85,
+    "media_next": 87,
+    "media_prev": 88,
+    "volume_up": 24,
+    "volume_down": 25,
+}
+
+
+def print_ui_help():
+    print(
+        """Usage: agy-shizuku ui <action> [args]
+
+Actions:
+  top [--json]                             Show foreground package, wakefulness, screen size
+  open <pkg|pkg/Activity|android.action>   Launch app or Settings action
+  dump [--json] [--pkg <pkg>] [--clickable] Parse UI hierarchy XML with center coords
+  find <query> [--pkg <pkg>] [--clickable] [--json]
+                                           Find nodes by text/desc/resource-id
+  tap <x> <y> [--expect-pkg <pkgs>] [--allow-self]
+  swipe <x1> <y1> <x2> <y2> [ms] [--expect-pkg <pkgs>] [--allow-self]
+  scroll <down|up|left|right> [--duration <ms>] [--expect-pkg <pkgs>] [--allow-self]
+  text "<text>" [--expect-pkg <pkgs>] [--allow-self]
+  key <name|code> [--expect-pkg <pkgs>] [--allow-self]
+  screen <output.png>                      Capture screenshot via screencap -p
+  return                                   Bring Antigravity MainActivity back to front"""
+    )
+
+
+def ui_parse_bounds(bounds_str):
+    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds_str or "")
+    if not m:
+        return None
+    x1, y1, x2, y2 = map(int, m.groups())
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2, (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def ui_top_info():
+    cmd = (
+        "echo '===ACT==='; dumpsys activity activities | grep -E 'topResumedActivity|ResumedActivity' | head -n 4; "
+        "echo '===WAKE==='; dumpsys power | grep -E 'mWakefulness=' | head -n 1; "
+        "echo '===WM==='; wm size"
+    )
+    res = gw_exec(cmd, timeout=15)
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error") or res.get("stderr") or "top query failed"}
+    raw = res.get("stdout") or ""
+    sections = {}
+    cur = None
+    buf = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if s.startswith("===") and s.endswith("===") and len(s) > 6:
+            if cur is not None:
+                sections[cur] = "\n".join(buf)
+            cur = s[3:-3]
+            buf = []
+        else:
+            buf.append(line)
+    if cur is not None:
+        sections[cur] = "\n".join(buf)
+
+    act_lines = [l.strip() for l in sections.get("ACT", "").splitlines() if l.strip()]
+    picked = next((l for l in act_lines if "topResumedActivity=" in l), act_lines[0] if act_lines else "")
+    comp_m = re.search(r"\bu\d+\s+([^\s}]+/[^\s}]+)", picked)
+    component = comp_m.group(1) if comp_m else ""
+    pkg = component.split("/", 1)[0] if "/" in component else ""
+
+    wake_m = re.search(r"mWakefulness=([^\s]+)", sections.get("WAKE", ""))
+    wake = wake_m.group(1) if wake_m else "Unknown"
+
+    wm_sec = sections.get("WM", "")
+    ov_m = re.search(r"Override size:\s*(\d+)x(\d+)", wm_sec)
+    ph_m = re.search(r"Physical size:\s*(\d+)x(\d+)", wm_sec)
+    sz_m = ov_m or ph_m
+    width = int(sz_m.group(1)) if sz_m else 1080
+    height = int(sz_m.group(2)) if sz_m else 2400
+
+    return {
+        "ok": True,
+        "package": pkg,
+        "component": component,
+        "wakefulness": wake,
+        "width": width,
+        "height": height,
+    }
+
+
+def extract_ui_guard_flags(args):
+    expect_pkgs = None
+    allow_self = False
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--allow-self":
+            allow_self = True
+        elif a == "--expect-pkg":
+            if i + 1 >= len(args):
+                raise ValueError("--expect-pkg requires a package list")
+            expect_pkgs = args[i + 1]
+            i += 1
+        elif a.startswith("--expect-pkg="):
+            expect_pkgs = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+        i += 1
+    return rest, expect_pkgs, allow_self
+
+
+def ui_guard(action, expect_pkgs=None, allow_self=False):
+    info = ui_top_info()
+    if not info.get("ok"):
+        sys.stderr.write(f"agy-shizuku ui: failed checking foreground state: {info.get('error')}\n")
+        return None, 1
+    cur_pkg = info.get("package") or ""
+    if expect_pkgs:
+        allowed = {p.strip() for p in expect_pkgs.split(",") if p.strip()}
+        if cur_pkg not in allowed:
+            sys.stderr.write(
+                f"agy-shizuku ui: Refusing '{action}': foreground package '{cur_pkg}' not in {sorted(allowed)}.\n"
+            )
+            return None, 3
+    if not allow_self and cur_pkg == DEFAULT_PKG and action in ("back", "tap", "swipe", "scroll", "text"):
+        sys.stderr.write(
+            f"agy-shizuku ui: Refusing '{action}' while {DEFAULT_PKG} is in foreground; pass --allow-self to override.\n"
+        )
+        return None, 3
+    return info, 0
+
+
+def ui_dump_nodes(pkg_filter=None, clickable_only=False):
+    tmp_xml = f"/data/local/tmp/agy_ui_dump_{os.getpid()}.xml"
+    q_xml = shlex.quote(tmp_xml)
+    res = gw_exec(f"uiautomator dump --compressed {q_xml} >/dev/null && cat {q_xml}; rm -f {q_xml}", timeout=30)
+    out = res.get("stdout") or ""
+    if not res.get("ok") or "<hierarchy" not in out:
+        err = res.get("stderr") or res.get("error") or out[:200]
+        raise RuntimeError(f"uiautomator dump failed: {err}")
+    root = ET.fromstring(out[out.index("<hierarchy"):])
+    nodes = []
+    for idx, n in enumerate(root.iter("node")):
+        pkg = (n.attrib.get("package") or "").strip()
+        if pkg_filter and pkg != pkg_filter:
+            continue
+        clickable = n.attrib.get("clickable") == "true"
+        if clickable_only and not clickable:
+            continue
+        b_str = n.attrib.get("bounds") or ""
+        parsed_b = ui_parse_bounds(b_str)
+        nodes.append({
+            "index": idx,
+            "package": pkg,
+            "text": (n.attrib.get("text") or "").strip(),
+            "desc": (n.attrib.get("content-desc") or "").strip(),
+            "rid": (n.attrib.get("resource-id") or "").strip(),
+            "class": (n.attrib.get("class") or "").strip(),
+            "clickable": clickable,
+            "selected": n.attrib.get("selected") == "true",
+            "enabled": n.attrib.get("enabled") == "true",
+            "bounds": b_str,
+            "cx": parsed_b[4] if parsed_b else None,
+            "cy": parsed_b[5] if parsed_b else None,
+        })
+    return nodes
+
+
+def cmd_ui(args):
+    if not args or args[0] in ("-h", "--help", "help"):
+        print_ui_help()
+        return 0
+    action = args[0]
+    rest = args[1:]
+
+    if action == "top":
+        as_json = "--json" in rest
+        info = ui_top_info()
+        if as_json:
+            print(json.dumps(info, indent=2, ensure_ascii=False))
+            return 0 if info.get("ok") else 1
+        if not info.get("ok"):
+            sys.stderr.write(f"agy-shizuku ui top failed: {info.get('error')}\n")
+            return 1
+        print(f"Package     : {info.get('package')}")
+        print(f"Component   : {info.get('component')}")
+        print(f"Wakefulness : {info.get('wakefulness')}")
+        print(f"Screen      : {info.get('width')}x{info.get('height')}")
+        return 0
+
+    if action == "open":
+        if not rest:
+            sys.stderr.write("agy-shizuku ui: open requires <pkg | pkg/Activity | android.action>.\n")
+            return 2
+        target = rest[0].strip()
+        if "/" in target:
+            if not COMP_RE.match(target):
+                sys.stderr.write(f"agy-shizuku ui: invalid component: {target}\n")
+                return 2
+            res = gw_exec(f"am start -W -n {shlex.quote(target)}", timeout=25)
+        elif target.startswith("android."):
+            if not re.match(r"^[A-Za-z0-9_.]+$", target):
+                sys.stderr.write(f"agy-shizuku ui: invalid action: {target}\n")
+                return 2
+            res = gw_exec(f"am start -W -a {shlex.quote(target)}", timeout=25)
+        else:
+            if not valid_pkg(target):
+                sys.stderr.write(f"agy-shizuku ui: invalid package name: {target}\n")
+                return 2
+            res = gw_exec(
+                f"monkey -p {shlex.quote(target)} -c android.intent.category.LAUNCHER 1",
+                timeout=25,
+            )
+        if res.get("stdout"):
+            print(res["stdout"])
+        if res.get("stderr"):
+            sys.stderr.write(res["stderr"] + "\n")
+        return 0 if res.get("ok") else 1
+
+    if action == "return":
+        res = gw_exec(f"am start -n {shlex.quote(DEFAULT_COMPONENT)}", timeout=15)
+        if res.get("stdout"):
+            print(res["stdout"])
+        if res.get("stderr"):
+            sys.stderr.write(res["stderr"] + "\n")
+        return 0 if res.get("ok") else 1
+
+    if action == "dump":
+        as_json = False
+        clickable_only = False
+        pkg_filter = None
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a == "--json":
+                as_json = True
+            elif a == "--clickable":
+                clickable_only = True
+            elif a == "--pkg":
+                if i + 1 >= len(rest):
+                    sys.stderr.write("agy-shizuku ui: --pkg requires a package name.\n")
+                    return 2
+                pkg_filter = rest[i + 1]
+                i += 1
+            else:
+                sys.stderr.write(f"agy-shizuku ui: unknown dump option: {a}\n")
+                return 2
+            i += 1
+        try:
+            nodes = ui_dump_nodes(pkg_filter=pkg_filter, clickable_only=clickable_only)
+        except Exception as e:
+            sys.stderr.write(f"agy-shizuku ui: {e}\n")
+            return 1
+        if as_json:
+            print(json.dumps(nodes, indent=2, ensure_ascii=False))
+            return 0
+        for n in nodes:
+            if not (n["text"] or n["desc"] or n["rid"] or n["clickable"]):
+                continue
+            center = f"({n['cx']},{n['cy']})" if n["cx"] is not None else "(-,-)"
+            flags = "C" if n["clickable"] else "-"
+            print(f"[{n['index']:03d}] {flags} {center} pkg={n['package']} rid={n['rid']!r} text={n['text']!r} desc={n['desc']!r}")
+        return 0
+
+    if action == "find":
+        as_json = False
+        clickable_only = False
+        pkg_filter = None
+        query = None
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a == "--json":
+                as_json = True
+            elif a == "--clickable":
+                clickable_only = True
+            elif a == "--pkg":
+                if i + 1 >= len(rest):
+                    sys.stderr.write("agy-shizuku ui: --pkg requires a package name.\n")
+                    return 2
+                pkg_filter = rest[i + 1]
+                i += 1
+            elif a.startswith("-"):
+                sys.stderr.write(f"agy-shizuku ui: unknown find option: {a}\n")
+                return 2
+            elif query is None:
+                query = a
+            else:
+                query = f"{query} {a}"
+            i += 1
+        if not query:
+            sys.stderr.write("agy-shizuku ui: find requires <query>.\n")
+            return 2
+        try:
+            nodes = ui_dump_nodes(pkg_filter=pkg_filter, clickable_only=clickable_only)
+        except Exception as e:
+            sys.stderr.write(f"agy-shizuku ui: {e}\n")
+            return 1
+        ql = query.lower()
+        hits = []
+        for n in nodes:
+            if n["cx"] is None:
+                continue
+            tl = n["text"].lower()
+            dl = n["desc"].lower()
+            rl = n["rid"].lower()
+            score = 0
+            if tl == ql or dl == ql:
+                score += 20
+            elif ql in tl or ql in dl:
+                score += 10
+            elif ql in rl:
+                score += 6
+            else:
+                continue
+            if n["clickable"]:
+                score += 4
+            hits.append((score, n))
+        hits.sort(key=lambda pair: (-pair[0], pair[1]["index"]))
+        matched = [n for _, n in hits]
+        if as_json:
+            print(json.dumps(matched, indent=2, ensure_ascii=False))
+        else:
+            for n in matched:
+                print(
+                    f"({n['cx']},{n['cy']}) bounds={n['bounds']} clickable={n['clickable']} "
+                    f"rid={n['rid']!r} text={n['text']!r} desc={n['desc']!r}"
+                )
+        return 0 if matched else 1
+
+    if action == "screen":
+        if not rest:
+            sys.stderr.write("agy-shizuku ui: screen requires <output.png>.\n")
+            return 2
+        real_out = os.path.abspath(rest[0])
+        stage = f"/storage/emulated/0/Download/.agy-shizuku-screen-{os.getpid()}.png"
+        try:
+            res = gw_exec(f"screencap -p {shlex.quote(stage)}", timeout=20)
+            if not res.get("ok") or not os.path.isfile(stage):
+                sys.stderr.write(f"agy-shizuku ui: screencap failed: {res.get('error') or res.get('stderr')}\n")
+                return 1
+            with open(stage, "rb") as f:
+                hdr = f.read(24)
+            if len(hdr) < 24 or hdr[:8] != b"\x89PNG\r\n\x1a\n":
+                sys.stderr.write("agy-shizuku ui: screencap did not produce a valid PNG.\n")
+                return 1
+            parent = os.path.dirname(real_out)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            shutil.move(stage, real_out)
+            w, h = struct.unpack(">II", hdr[16:24])
+            size = os.path.getsize(real_out)
+            print(f"Saved screenshot: {real_out} ({size} bytes, {w}x{h})")
+            return 0
+        finally:
+            if os.path.exists(stage):
+                try:
+                    os.remove(stage)
+                except OSError:
+                    pass
+
+    try:
+        clean_args, expect_pkgs, allow_self = extract_ui_guard_flags(rest)
+    except ValueError as e:
+        sys.stderr.write(f"agy-shizuku ui: {e}\n")
+        return 2
+
+    if action == "tap":
+        if len(clean_args) != 2:
+            sys.stderr.write("agy-shizuku ui: tap requires <x> <y>.\n")
+            return 2
+        try:
+            x, y = int(clean_args[0]), int(clean_args[1])
+        except ValueError:
+            sys.stderr.write("agy-shizuku ui: tap coordinates must be integers.\n")
+            return 2
+        if not (0 <= x <= 10000 and 0 <= y <= 10000):
+            sys.stderr.write("agy-shizuku ui: tap coordinates out of bounds.\n")
+            return 2
+        _, rc = ui_guard("tap", expect_pkgs=expect_pkgs, allow_self=allow_self)
+        if rc != 0:
+            return rc
+        res = gw_exec(f"input tap {x} {y}", timeout=15)
+        return 0 if res.get("ok") else 1
+
+    if action == "swipe":
+        if len(clean_args) not in (4, 5):
+            sys.stderr.write("agy-shizuku ui: swipe requires <x1> <y1> <x2> <y2> [duration_ms].\n")
+            return 2
+        try:
+            x1, y1, x2, y2 = (int(v) for v in clean_args[:4])
+            dur = int(clean_args[4]) if len(clean_args) == 5 else 300
+        except ValueError:
+            sys.stderr.write("agy-shizuku ui: swipe coordinates and duration must be integers.\n")
+            return 2
+        if not (50 <= dur <= 5000):
+            sys.stderr.write("agy-shizuku ui: swipe duration_ms must be between 50 and 5000.\n")
+            return 2
+        _, rc = ui_guard("swipe", expect_pkgs=expect_pkgs, allow_self=allow_self)
+        if rc != 0:
+            return rc
+        res = gw_exec(f"input swipe {x1} {y1} {x2} {y2} {dur}", timeout=15)
+        return 0 if res.get("ok") else 1
+
+    if action == "scroll":
+        dur = 320
+        direction = None
+        i = 0
+        while i < len(clean_args):
+            a = clean_args[i]
+            if a == "--duration":
+                if i + 1 >= len(clean_args):
+                    sys.stderr.write("agy-shizuku ui: --duration requires milliseconds.\n")
+                    return 2
+                try:
+                    dur = int(clean_args[i + 1])
+                except ValueError:
+                    sys.stderr.write("agy-shizuku ui: invalid duration.\n")
+                    return 2
+                i += 1
+            elif direction is None:
+                direction = a.lower()
+            else:
+                sys.stderr.write(f"agy-shizuku ui: unexpected scroll arg: {a}\n")
+                return 2
+            i += 1
+        if direction not in ("down", "up", "left", "right") or not (50 <= dur <= 5000):
+            sys.stderr.write("agy-shizuku ui: scroll requires <down|up|left|right> and duration 50..5000ms.\n")
+            return 2
+        info, rc = ui_guard("scroll", expect_pkgs=expect_pkgs, allow_self=allow_self)
+        if rc != 0:
+            return rc
+        w, h = info["width"], info["height"]
+        coords = {
+            "down": (w // 2, int(h * 0.72), w // 2, int(h * 0.28)),
+            "up": (w // 2, int(h * 0.28), w // 2, int(h * 0.72)),
+            "left": (int(w * 0.82), h // 2, int(w * 0.18), h // 2),
+            "right": (int(w * 0.18), h // 2, int(w * 0.82), h // 2),
+        }[direction]
+        res = gw_exec(f"input swipe {coords[0]} {coords[1]} {coords[2]} {coords[3]} {dur}", timeout=15)
+        return 0 if res.get("ok") else 1
+
+    if action == "text":
+        if not clean_args:
+            sys.stderr.write("agy-shizuku ui: text requires <string>.\n")
+            return 2
+        raw_text = " ".join(clean_args) if len(clean_args) > 1 else clean_args[0]
+        encoded = raw_text.replace(" ", "%s")
+        _, rc = ui_guard("text", expect_pkgs=expect_pkgs, allow_self=allow_self)
+        if rc != 0:
+            return rc
+        res = gw_exec(f"input text {shlex.quote(encoded)}", timeout=15)
+        return 0 if res.get("ok") else 1
+
+    if action == "key":
+        if len(clean_args) != 1:
+            sys.stderr.write("agy-shizuku ui: key requires <name|keycode>.\n")
+            return 2
+        raw_key = clean_args[0].lower()
+        if raw_key in UI_KEY_MAP:
+            keycode = UI_KEY_MAP[raw_key]
+        else:
+            try:
+                keycode = int(raw_key)
+            except ValueError:
+                sys.stderr.write(f"agy-shizuku ui: unknown key '{clean_args[0]}'.\n")
+                return 2
+            if not (0 <= keycode <= 400):
+                sys.stderr.write("agy-shizuku ui: numeric keycode must be 0..400.\n")
+                return 2
+        guard_action = "back" if keycode == 4 else f"key:{raw_key}"
+        _, rc = ui_guard(guard_action, expect_pkgs=expect_pkgs, allow_self=allow_self)
+        if rc != 0:
+            return rc
+        res = gw_exec(f"input keyevent {keycode}", timeout=15)
+        return 0 if res.get("ok") else 1
+
+    sys.stderr.write(f"agy-shizuku ui: unknown action '{action}'. Run 'agy-shizuku ui --help'.\n")
+    return 2
+
+
 def cmd_exec(args):
     if not args:
         sys.stderr.write("agy-shizuku: exec requires a shell command.\n")
@@ -569,6 +1062,7 @@ def main():
         "logcat": cmd_logcat,
         "install": cmd_install,
         "pkg": cmd_pkg,
+        "ui": cmd_ui,
         "exec": cmd_exec,
     }
     handler = dispatch.get(sub)
