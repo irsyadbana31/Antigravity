@@ -233,6 +233,16 @@ private fun tryTableStart(lines: List<String>, idx: Int): Pair<List<String>, Lis
     return headers to aligns
 }
 
+private fun parseHeadingLine(trimmed: String): Pair<Int, String>? {
+    if (!trimmed.startsWith("#")) return null
+    val level = trimmed.takeWhile { it == '#' }.length
+    return if (level in 1..6 && trimmed.getOrNull(level) == ' ') {
+        level to trimmed.substring(level).trim()
+    } else {
+        null
+    }
+}
+
 private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
     RustTurboBridge.parseMarkdownNative(content)?.let { return it }
     val elements = mutableListOf<MarkdownElement>()
@@ -261,14 +271,11 @@ private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
             continue
         }
 
-        if (trimmed.startsWith("#")) {
-            val level = trimmed.takeWhile { it == '#' }.length
-            if (level in 1..6 && trimmed.getOrNull(level) == ' ') {
-                val text = trimmed.substring(level).trim()
-                elements.add(MarkdownElement.Heading(level, text))
-                i++
-                continue
-            }
+        val heading = parseHeadingLine(trimmed)
+        if (heading != null) {
+            elements.add(MarkdownElement.Heading(heading.first, heading.second))
+            i++
+            continue
         }
 
         if (trimmed.startsWith(">")) {
@@ -323,7 +330,7 @@ private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
                 if (rowTrim.isEmpty() ||
                     !rowTrim.contains('|') ||
                     rowTrim.startsWith("```") ||
-                    rowTrim.startsWith("#") ||
+                    parseHeadingLine(rowTrim) != null ||
                     rowTrim.startsWith(">")
                 ) {
                     break
@@ -341,16 +348,18 @@ private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
         while (i < lines.size) {
             val cur = lines[i]
             val curTrim = cur.trim()
-            if (curTrim.isEmpty() ||
-                curTrim.startsWith("```") ||
-                curTrim.startsWith("#") ||
-                curTrim.startsWith(">") ||
-                curTrim == "---" ||
-                curTrim == "***" ||
-                curTrim == "___" ||
-                BULLET_PREFIX_REGEX.containsMatchIn(curTrim) ||
-                NUM_PREFIX_REGEX.containsMatchIn(curTrim) ||
-                tryTableStart(lines, i) != null
+            if (paraLines.isNotEmpty() && (
+                curTrim.isEmpty() ||
+                    curTrim.startsWith("```") ||
+                    parseHeadingLine(curTrim) != null ||
+                    curTrim.startsWith(">") ||
+                    curTrim == "---" ||
+                    curTrim == "***" ||
+                    curTrim == "___" ||
+                    BULLET_PREFIX_REGEX.containsMatchIn(curTrim) ||
+                    NUM_PREFIX_REGEX.containsMatchIn(curTrim) ||
+                    tryTableStart(lines, i) != null
+                )
             ) {
                 break
             }

@@ -137,10 +137,22 @@ fn try_table_start(lines: &[&str], idx: usize) -> Option<(Vec<String>, Vec<char>
     Some((headers, aligns))
 }
 
+fn parse_heading_line(trimmed: &str) -> Option<(usize, &str)> {
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+    let level = trimmed.bytes().take_while(|&b| b == b'#').count();
+    if (1..=6).contains(&level) && trimmed.as_bytes().get(level) == Some(&b' ') {
+        Some((level, trimmed[level..].trim()))
+    } else {
+        None
+    }
+}
+
 fn is_paragraph_breaker(trimmed: &str) -> bool {
     trimmed.is_empty()
         || trimmed.starts_with("```")
-        || trimmed.starts_with('#')
+        || parse_heading_line(trimmed).is_some()
         || trimmed.starts_with('>')
         || trimmed == "---"
         || trimmed == "***"
@@ -199,22 +211,18 @@ fn parse_markdown_fast(content: &str) -> String {
         }
 
         // Heading
-        if trimmed.starts_with('#') {
-            let level = trimmed.bytes().take_while(|&b| b == b'#').count();
-            if (1..=6).contains(&level) && trimmed.as_bytes().get(level) == Some(&b' ') {
-                let text = trimmed[level..].trim();
-                let level_str = match level {
-                    1 => "1",
-                    2 => "2",
-                    3 => "3",
-                    4 => "4",
-                    5 => "5",
-                    _ => "6",
-                };
-                append_record(&mut out, 'H', level_str, text);
-                i += 1;
-                continue;
-            }
+        if let Some((level, text)) = parse_heading_line(trimmed) {
+            let level_str = match level {
+                1 => "1",
+                2 => "2",
+                3 => "3",
+                4 => "4",
+                5 => "5",
+                _ => "6",
+            };
+            append_record(&mut out, 'H', level_str, text);
+            i += 1;
+            continue;
         }
 
         // BlockQuote
@@ -295,7 +303,7 @@ fn parse_markdown_fast(content: &str) -> String {
                 if row_trim.is_empty()
                     || !row_trim.contains('|')
                     || row_trim.starts_with("```")
-                    || row_trim.starts_with('#')
+                    || parse_heading_line(row_trim).is_some()
                     || row_trim.starts_with('>')
                 {
                     break;
@@ -330,7 +338,7 @@ fn parse_markdown_fast(content: &str) -> String {
         let mut first = true;
         while i < lines.len() {
             let cur_trim = lines[i].trim();
-            if is_paragraph_breaker_at(&lines, i) {
+            if !first && is_paragraph_breaker_at(&lines, i) {
                 break;
             }
             if !first {
@@ -733,5 +741,44 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert!(memmem::find(&patched, b"/bin///sh").is_some());
         assert!(memmem::find(&patched, b"etc//resolv.conf").is_some());
+    }
+
+    #[test]
+    fn parses_partial_streaming_headings_and_hashtags_without_hanging() {
+        for sample in ["#", "##", "###", "### ", "####\t", "#hashtag", "#1 item", "####### seven hashes"] {
+            let recs = decode_records(&parse_markdown_fast(sample));
+            assert_eq!(recs.len(), 1);
+            assert_eq!(recs[0].0, 'P');
+            assert_eq!(recs[0].2, sample.trim());
+        }
+
+        let intro_partial = decode_records(&parse_markdown_fast("Intro\n###"));
+        assert_eq!(intro_partial, vec![('P', "".to_string(), "Intro ###".to_string())]);
+
+        let mixed = decode_records(&parse_markdown_fast("Intro\n#tag\n### Real Heading\nBody"));
+        assert_eq!(
+            mixed,
+            vec![
+                ('P', "".to_string(), "Intro #tag".to_string()),
+                ('H', "3".to_string(), "Real Heading".to_string()),
+                ('P', "".to_string(), "Body".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn streaming_char_by_char_full_markdown_terminates_cleanly() {
+        let doc = "### Ringkasan\n\nParagraf #1 dengan #tag\n\n| Col | Val |\n| :--- | ---: |\n| #a | 10 |\n\n- [x] Done\n\n```rust\n# comment\nfn main() {}\n```\n> quote\n---\n####### literal\n";
+        for (end_idx, _) in doc.char_indices() {
+            let encoded = parse_markdown_fast(&doc[..end_idx]);
+            let _ = decode_records(&encoded);
+        }
+        let recs = decode_records(&parse_markdown_fast(doc));
+        assert!(recs
+            .iter()
+            .any(|(tag, meta, body)| *tag == 'H' && meta == "3" && body == "Ringkasan"));
+        assert!(recs
+            .iter()
+            .any(|(tag, _, body)| *tag == 'P' && body == "####### literal"));
     }
 }

@@ -116,4 +116,30 @@ class UpgradeSuiteTest {
         assertEquals(listOf("Auth | Token", "PASS", "100"), table.rows[0])
         assertEquals(listOf("Stream", "FAST", "99"), table.rows[1])
     }
+
+    @Test
+    fun parseMarkdown_handlesStreamingPartialHeadingsAndHashtagsWithoutHanging() {
+        assertEquals(listOf(MarkdownElement.Paragraph("#")), parseMarkdown("#"))
+        assertEquals(listOf(MarkdownElement.Paragraph("##")), parseMarkdown("##"))
+        assertEquals(listOf(MarkdownElement.Paragraph("###")), parseMarkdown("###"))
+        assertEquals(listOf(MarkdownElement.Paragraph("###")), parseMarkdown("### "))
+        assertEquals(listOf(MarkdownElement.Paragraph("#hashtag")), parseMarkdown("#hashtag"))
+        assertEquals(listOf(MarkdownElement.Paragraph("####### 7 hashes")), parseMarkdown("####### 7 hashes"))
+        assertEquals(listOf(MarkdownElement.Paragraph("Intro ###")), parseMarkdown("Intro\n###"))
+        assertEquals(
+            listOf(
+                MarkdownElement.Paragraph("Intro #tag"),
+                MarkdownElement.Heading(3, "Real Heading"),
+                MarkdownElement.Paragraph("Body")
+            ),
+            parseMarkdown("Intro\n#tag\n### Real Heading\nBody")
+        )
+
+        val sample = "### Ringkasan\n\nParagraf #1 dengan #tag\n\n| Col | Val |\n| :--- | ---: |\n| #a | 10 |\n\n- [x] Done\n\n```kotlin\n# comment\nval x = 1\n```\n> quote\n---\n####### literal\n"
+        for (len in 1..sample.length) {
+            val prefix = sample.substring(0, len)
+            val parsed = parseMarkdown(prefix)
+            assertTrue(parsed.isNotEmpty() || prefix.isBlank())
+        }
+    }
 }

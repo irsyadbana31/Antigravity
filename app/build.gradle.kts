@@ -29,8 +29,8 @@ android {
         // Must remain 28: Android 10+ (targetSdk >= 29) enforces SELinux execute_no_trans W^X,
         // blocking execve() on agy/node/python3 binaries inside app filesDir.
         targetSdk = 28
-        versionCode = 15
-        versionName = "1.2.3-turbo"
+        versionCode = 16
+        versionName = "1.2.4-turbo"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
