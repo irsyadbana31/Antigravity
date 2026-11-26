@@ -54,7 +54,7 @@ class AntigravityApp : Application() {
     }
 
     private fun setupCrashHandler() {
-        if (isCrashHandlerProcess()) return
+        if (isAuxiliaryProcess()) return
 
         Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
             val sw = StringWriter()
