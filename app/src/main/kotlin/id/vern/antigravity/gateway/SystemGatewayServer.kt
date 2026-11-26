@@ -227,6 +227,91 @@ class SystemGatewayServer(
             }
             return map
         }
+
+        private val VALID_PACKAGE_REGEX = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
+
+        internal fun validatePackageName(raw: String): String? {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.length > 160) return null
+            return if (VALID_PACKAGE_REGEX.matches(trimmed)) trimmed else null
+        }
+
+        internal fun parseShizukuDiagOutput(pkg: String, raw: String): JSONObject {
+            val sections = LinkedHashMap<String, String>()
+            var currentHeader: String? = null
+            val curBuf = StringBuilder()
+            for (line in raw.lineSequence()) {
+                val s = line.trim()
+                if (s.startsWith("===") && s.endsWith("===") && s.length > 6) {
+                    currentHeader?.let { sections[it] = curBuf.toString() }
+                    currentHeader = s.substring(3, s.length - 3)
+                    curBuf.setLength(0)
+                } else {
+                    if (curBuf.isNotEmpty()) curBuf.append('\n')
+                    curBuf.append(line)
+                }
+            }
+            currentHeader?.let { sections[it] = curBuf.toString() }
+
+            fun firstInt(regex: String, text: String): Int? =
+                Regex(regex).find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+            fun firstDouble(regex: String, text: String): Double? =
+                Regex(regex).find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
+
+            val pkgSec = sections["PKG"].orEmpty()
+            val versionCode = firstInt("""versionCode=(\d+)""", pkgSec)
+            val versionName = Regex("""versionName=(\S+)""").find(pkgSec)?.groupValues?.getOrNull(1)
+            val lastUpdate = Regex("""lastUpdateTime=(.+)""").find(pkgSec)?.groupValues?.getOrNull(1)?.trim()
+
+            val pid = sections["PID"].orEmpty().trim().split(Regex("""\s+""")).firstOrNull()?.toIntOrNull()
+
+            val battSec = sections["BATT"].orEmpty()
+            val tempDeci = firstInt("""(?m)^\s*temperature:\s*(-?\d+)""", battSec)
+            val batteryJson = JSONObject()
+                .put("level", firstInt("""(?m)^\s*level:\s*(\d+)""", battSec) ?: JSONObject.NULL)
+                .put("voltage_mv", firstInt("""(?m)^\s*voltage:\s*(\d+)""", battSec) ?: JSONObject.NULL)
+                .put("temperature_c", tempDeci?.let { kotlin.math.round(it.toDouble()) / 10.0 } ?: JSONObject.NULL)
+                .put("status", firstInt("""(?m)^\s*status:\s*(\d+)""", battSec) ?: JSONObject.NULL)
+
+            val totalProcs = sections["PROCS"].orEmpty().trim().split(Regex("""\s+""")).firstOrNull()?.toIntOrNull()
+
+            val memSec = sections["MEM"].orEmpty()
+            val memJson = JSONObject()
+                .put("total_pss_kb", firstInt("""TOTAL PSS:\s*(\d+)""", memSec) ?: JSONObject.NULL)
+                .put("total_rss_kb", firstInt("""TOTAL RSS:\s*(\d+)""", memSec) ?: JSONObject.NULL)
+
+            val gfxSec = sections["GFX"].orEmpty()
+            val jankMatch = Regex("""Janky frames:\s*(\d+)\s*\(([\d.]+)%\)""").find(gfxSec)
+            val gfxJson = JSONObject()
+                .put("total_frames", firstInt("""Total frames rendered:\s*(\d+)""", gfxSec) ?: JSONObject.NULL)
+                .put("janky_frames", jankMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: JSONObject.NULL)
+                .put("janky_percent", jankMatch?.groupValues?.getOrNull(2)?.toDoubleOrNull() ?: JSONObject.NULL)
+                .put("p50_ms", firstInt("""50th percentile:\s*(\d+)ms""", gfxSec) ?: JSONObject.NULL)
+                .put("p90_ms", firstInt("""90th percentile:\s*(\d+)ms""", gfxSec) ?: JSONObject.NULL)
+                .put("p95_ms", firstInt("""95th percentile:\s*(\d+)ms""", gfxSec) ?: JSONObject.NULL)
+                .put("p99_ms", firstInt("""99th percentile:\s*(\d+)ms""", gfxSec) ?: JSONObject.NULL)
+
+            val anrArray = JSONArray()
+            for (line in sections["ANR"].orEmpty().lineSequence()) {
+                val trimmedLine = line.trim()
+                if (trimmedLine.isNotEmpty()) {
+                    anrArray.put(trimmedLine)
+                }
+            }
+
+            return JSONObject()
+                .put("package", pkg)
+                .put("version_name", versionName ?: JSONObject.NULL)
+                .put("version_code", versionCode ?: JSONObject.NULL)
+                .put("last_update_time", lastUpdate ?: JSONObject.NULL)
+                .put("pid", pid ?: JSONObject.NULL)
+                .put("battery", batteryJson)
+                .put("total_processes", totalProcs ?: JSONObject.NULL)
+                .put("meminfo", memJson)
+                .put("gfxinfo", gfxJson)
+                .put("recent_anrs", anrArray)
+        }
     }
 
     private data class CommandRecord(
@@ -517,6 +602,8 @@ class SystemGatewayServer(
 
             "/gateway/shizuku" -> return ShizukuManager.buildStatusJson(context)
 
+            "/gateway/shizuku/diag" -> return handleShizukuDiag(query, parseJsonBody(body))
+
             "/gateway/logs" -> {
                 val tail = query["tail"]?.toIntOrNull() ?: 50
                 return JSONObject()
@@ -581,6 +668,7 @@ class SystemGatewayServer(
             "exec" -> handleExec(json)
             "status" -> handleStatus()
             "shizuku" -> ShizukuManager.buildStatusJson(context)
+            "shizuku_diag" -> handleShizukuDiag(emptyMap(), json)
             "logs" -> JSONObject()
                 .put("ok", true)
                 .put("logs", AppLogger.getRecentJson(json.optInt("tail", 50)))
@@ -975,6 +1063,67 @@ class SystemGatewayServer(
             arr.put(rec.toJson())
         }
         return arr
+    }
+
+    private fun handleShizukuDiag(query: Map<String, String>, json: JSONObject): JSONObject {
+        val snapshot = ShizukuManager.inspectStatus(context)
+        if (!snapshot.enabled || !snapshot.isReady) {
+            return JSONObject()
+                .put("ok", false)
+                .put(
+                    "error",
+                    if (!snapshot.enabled) "Shizuku is disabled in Settings -> Customizations"
+                    else "Shizuku service not ready"
+                )
+                .put("state", snapshot.state.name.lowercase())
+                .put("enabled", snapshot.enabled)
+                .put("ready", snapshot.isReady)
+        }
+        val rawPkg = query["pkg"] ?: json.optString("pkg", "").ifBlank { json.optString("package", "") }
+        val pkg = if (rawPkg.isBlank()) {
+            context.packageName
+        } else {
+            validatePackageName(rawPkg) ?: return JSONObject()
+                .put("ok", false)
+                .put("error", "Invalid package name: $rawPkg")
+        }
+        val diagCmd = listOf(
+            "echo '===PKG==='",
+            "dumpsys package '$pkg' | grep -E 'versionCode|versionName|lastUpdateTime' | head -n 5",
+            "echo '===PID==='",
+            "pidof '$pkg' || true",
+            "echo '===BATT==='",
+            "dumpsys battery | grep -E 'level:|voltage:|temperature:|status:'",
+            "echo '===PROCS==='",
+            "ps -A | wc -l",
+            "echo '===MEM==='",
+            "dumpsys meminfo '$pkg' | grep -E 'TOTAL PSS:' | head -n 2",
+            "echo '===GFX==='",
+            "dumpsys gfxinfo '$pkg' | head -n 22",
+            "echo '===ANR==='",
+            "dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5"
+        ).joinToString("; ")
+        val execRes = ShizukuManager.executePrivileged(
+            context = context,
+            cmd = diagCmd,
+            timeoutMs = 15_000L,
+            gatewayPort = boundPort,
+            gatewayToken = ensureGatewayToken(context.filesDir)
+        )
+        if (!execRes.ok) {
+            return JSONObject()
+                .put("ok", false)
+                .put("package", pkg)
+                .put("transport", execRes.transport)
+                .put("uid", execRes.uid)
+                .put("duration_ms", execRes.durationMs)
+                .put("error", execRes.error ?: "Shizuku diagnostics execution failed")
+        }
+        return parseShizukuDiagOutput(pkg, execRes.stdout)
+            .put("ok", true)
+            .put("transport", execRes.transport)
+            .put("uid", execRes.uid)
+            .put("duration_ms", execRes.durationMs)
     }
 
     private fun handleCrashQuery(): JSONObject {

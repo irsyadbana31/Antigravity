@@ -24,6 +24,11 @@ if [ -z "${PREFIX:-}" ]; then
   PREFIX="$(CDPATH= cd -- "$BASEDIR/.." 2>/dev/null && pwd)"
 fi
 FILES_DIR="${PREFIX%/usr}"
+if [ -z "${TMPDIR:-}" ]; then
+  TMPDIR="$FILES_DIR/tmp"
+  [ -d "$TMPDIR" ] || /system/bin/mkdir -p "$TMPDIR" 2>/dev/null || true
+  export TMPDIR
+fi
 
 SHIZUKU_CONF="$FILES_DIR/logs/shizuku.conf"
 SHIZUKU_ENABLED="${AGY_SHIZUKU_ENABLED:-0}"

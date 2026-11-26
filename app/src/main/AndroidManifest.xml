@@ -50,6 +50,7 @@
     <application
         android:name="id.vern.antigravity.AntigravityApp"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:usesCleartextTraffic="true"

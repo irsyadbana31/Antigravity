@@ -100,6 +100,8 @@ class ShizukuConfigTest {
         assertTrue(content.contains("unset LD_PRELOAD LD_LIBRARY_PATH"))
         assertTrue(content.contains("exec /system/bin/app_process"))
         assertTrue(content.contains("/system/bin/chmod"))
+        assertTrue(content.contains("TMPDIR="))
+        assertTrue(content.contains("export TMPDIR"))
 
         val shellLines = buildList {
             var inPython = false
@@ -119,7 +121,23 @@ class ShizukuConfigTest {
             }
         }.joinToString("\n")
 
-        assertFalse(Regex("""\b(dirname|sed|head|tr|env)\b""").containsMatchIn(shellLines))
+        assertFalse(Regex("""\b(dirname|sed|head|tr|env|mkdir|chmod)\b""").containsMatchIn(shellLines.replace("/system/bin/mkdir", "").replace("/system/bin/chmod", "")))
+        assertFalse(content.contains("exec env"))
+    }
+
+    @Test
+    fun agyShizukuOverlayScript_existsAndHasExpectedSubcommands() {
+        val scriptFile = listOf(
+            java.io.File("src/main/assets/overlay/bin/agy-shizuku"),
+            java.io.File("app/src/main/assets/overlay/bin/agy-shizuku"),
+        ).first { it.isFile }
+        val content = scriptFile.readText()
+        assertTrue(content.startsWith("#!/system/bin/sh"))
+        assertTrue(content.contains("TMPDIR="))
+        assertTrue(content.contains("export "))
+        listOf("\"status\"", "\"diag\"", "\"anr\"", "\"logcat\"", "\"install\"", "\"pkg\"", "\"exec\"").forEach { sub ->
+            assertTrue("Missing subcommand $sub", content.contains(sub))
+        }
         assertFalse(content.contains("exec env"))
     }
 }

@@ -149,4 +149,80 @@ class SystemGatewayServerTest {
         assertEquals("1", rishEnv["AGY_SHIZUKU_ENABLED"])
         assertEquals("binder", rishEnv["AGY_SHIZUKU_BACKEND"])
     }
+
+    @Test
+    fun validatePackageName_acceptsValidAndRejectsShellInjection() {
+        assertEquals(
+            "id.vern.antigravity.turbo",
+            SystemGatewayServer.validatePackageName(" id.vern.antigravity.turbo ")
+        )
+        assertEquals("com.android.settings", SystemGatewayServer.validatePackageName("com.android.settings"))
+        assertNull(SystemGatewayServer.validatePackageName(""))
+        assertNull(SystemGatewayServer.validatePackageName("singleword"))
+        assertNull(SystemGatewayServer.validatePackageName("com.example; rm -rf /"))
+        assertNull(SystemGatewayServer.validatePackageName("com.example && id"))
+        assertNull(SystemGatewayServer.validatePackageName("../etc/passwd"))
+        assertNull(SystemGatewayServer.validatePackageName("123.invalid.pkg"))
+    }
+
+    @Test
+    fun parseShizukuDiagOutput_extractsStructuredMetrics() {
+        val sampleRaw = """
+            ===PKG===
+            versionCode=17 minSdk=26 targetSdk=28
+            versionName=1.2.5-turbo
+            lastUpdateTime=2026-11-26 17:15:00
+            ===PID===
+            24019
+            ===BATT===
+            level: 78
+            voltage: 4120
+            temperature: 345
+            status: 2
+            ===PROCS===
+            1142
+            ===MEM===
+            TOTAL PSS: 125301 TOTAL RSS: 223524 TOTAL SWAP PSS: 21299
+            ===GFX===
+            Total frames rendered: 9933
+            Janky frames: 9 (0.09%)
+            50th percentile: 10ms
+            90th percentile: 13ms
+            95th percentile: 14ms
+            99th percentile: 19ms
+            ===ANR===
+            2026-11-26 15:20:07 data_app_anr (compressed text, 28903 bytes)
+        """.trimIndent()
+
+        val diag = SystemGatewayServer.parseShizukuDiagOutput("id.vern.antigravity.turbo", sampleRaw)
+        assertEquals("id.vern.antigravity.turbo", diag.getString("package"))
+        assertEquals("1.2.5-turbo", diag.getString("version_name"))
+        assertEquals(17, diag.getInt("version_code"))
+        assertEquals("2026-11-26 17:15:00", diag.getString("last_update_time"))
+        assertEquals(24019, diag.getInt("pid"))
+        assertEquals(1142, diag.getInt("total_processes"))
+
+        val batt = diag.getJSONObject("battery")
+        assertEquals(78, batt.getInt("level"))
+        assertEquals(34.5, batt.getDouble("temperature_c"), 0.01)
+        assertEquals(4120, batt.getInt("voltage_mv"))
+        assertEquals(2, batt.getInt("status"))
+
+        val mem = diag.getJSONObject("meminfo")
+        assertEquals(125301, mem.getInt("total_pss_kb"))
+        assertEquals(223524, mem.getInt("total_rss_kb"))
+
+        val gfx = diag.getJSONObject("gfxinfo")
+        assertEquals(9933, gfx.getInt("total_frames"))
+        assertEquals(9, gfx.getInt("janky_frames"))
+        assertEquals(0.09, gfx.getDouble("janky_percent"), 0.001)
+        assertEquals(10, gfx.getInt("p50_ms"))
+        assertEquals(13, gfx.getInt("p90_ms"))
+        assertEquals(14, gfx.getInt("p95_ms"))
+        assertEquals(19, gfx.getInt("p99_ms"))
+
+        val anrs = diag.getJSONArray("recent_anrs")
+        assertEquals(1, anrs.length())
+        assertTrue(anrs.getString(0).contains("2026-11-26 15:20:07"))
+    }
 }

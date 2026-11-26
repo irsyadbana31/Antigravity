@@ -1,0 +1,583 @@
+#!/system/bin/sh
+# Antigravity Shizuku CLI utility; bridges via Antigravity Gateway (uid=2000).
+_agy_shizuku_trim() {
+  _trimmed="$1"
+  while :; do
+    case "$_trimmed" in
+      " "*|"	"*) _trimmed="${_trimmed#?}" ;;
+      *) break ;;
+    esac
+  done
+  while :; do
+    case "$_trimmed" in
+      *" "|*"	") _trimmed="${_trimmed%?}" ;;
+      *) break ;;
+    esac
+  done
+}
+
+_script_dir="${0%/*}"
+[ "$_script_dir" = "$0" ] && _script_dir="."
+BASEDIR="$(CDPATH= cd -- "$_script_dir" 2>/dev/null && pwd)"
+unset _script_dir
+if [ -z "${PREFIX:-}" ]; then
+  PREFIX="$(CDPATH= cd -- "$BASEDIR/.." 2>/dev/null && pwd)"
+fi
+FILES_DIR="${PREFIX%/usr}"
+if [ -z "${TMPDIR:-}" ]; then
+  TMPDIR="$FILES_DIR/tmp"
+  [ -d "$TMPDIR" ] || /system/bin/mkdir -p "$TMPDIR" 2>/dev/null || true
+  export TMPDIR
+fi
+
+SHIZUKU_CONF="$FILES_DIR/logs/shizuku.conf"
+SHIZUKU_ENABLED="${AGY_SHIZUKU_ENABLED:-0}"
+if [ -r "$SHIZUKU_CONF" ]; then
+  _conf_en=""
+  while IFS='=' read -r _k _v || [ -n "$_k" ]; do
+    _agy_shizuku_trim "$_k"
+    if [ "$_trimmed" = "SHIZUKU_ENABLED" ] && [ -z "$_conf_en" ]; then
+      _agy_shizuku_trim "$_v"
+      _conf_en="$_trimmed"
+      break
+    fi
+  done < "$SHIZUKU_CONF" 2>/dev/null
+  [ -n "$_conf_en" ] && SHIZUKU_ENABLED="$_conf_en"
+  unset _k _v _conf_en _trimmed
+fi
+
+_subcmd="${1:-help}"
+case "$_subcmd" in
+  -h|--help|help|status) ;;
+  *)
+    if [ "$SHIZUKU_ENABLED" != "1" ]; then
+      echo "agy-shizuku: Shizuku is disabled in Antigravity Settings -> Customizations." >&2
+      exit 1
+    fi
+    ;;
+esac
+
+GATEWAY_PORT="${AGY_GATEWAY_PORT:-}"
+if [ -z "$GATEWAY_PORT" ] && [ -r "$FILES_DIR/logs/gateway.port" ]; then
+  IFS= read -r _gw_raw < "$FILES_DIR/logs/gateway.port" 2>/dev/null || true
+  _agy_shizuku_trim "$_gw_raw"
+  GATEWAY_PORT="$_trimmed"
+  unset _gw_raw _trimmed
+fi
+GATEWAY_TOKEN="${AGY_GATEWAY_TOKEN:-}"
+if [ -z "$GATEWAY_TOKEN" ] && [ -r "$FILES_DIR/logs/gateway.token" ]; then
+  IFS= read -r _gw_raw < "$FILES_DIR/logs/gateway.token" 2>/dev/null || true
+  _agy_shizuku_trim "$_gw_raw"
+  GATEWAY_TOKEN="$_trimmed"
+  unset _gw_raw _trimmed
+fi
+
+PYTHON_BIN=""
+if [ -x "$PREFIX/bin/python3" ]; then
+  PYTHON_BIN="$PREFIX/bin/python3"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+fi
+if [ -z "$PYTHON_BIN" ]; then
+  echo "agy-shizuku: python3 not found in $PREFIX/bin or PATH." >&2
+  exit 1
+fi
+
+_py_dir="${PYTHON_BIN%/*}"
+_py_lib="${_py_dir%/bin}/lib"
+PATH="${PATH:-$PREFIX/bin:/system/bin}"
+HOME="${HOME:-$FILES_DIR/home}"
+LD_LIBRARY_PATH="${_py_lib}:$PREFIX/lib:/system/lib64"
+AGY_GW_PORT="$GATEWAY_PORT"
+AGY_GW_TOKEN="$GATEWAY_TOKEN"
+AGY_FILES_DIR="$FILES_DIR"
+export PATH HOME PREFIX TMPDIR LD_LIBRARY_PATH AGY_GW_PORT AGY_GW_TOKEN AGY_FILES_DIR
+unset _py_dir _py_lib
+exec "$PYTHON_BIN" - "$@" <<'PYEOF'
+import json
+import os
+import re
+import shlex
+import shutil
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+DEFAULT_PKG = "id.vern.antigravity.turbo"
+DEFAULT_COMPONENT = "id.vern.antigravity.turbo/id.vern.antigravity.ui.MainActivity"
+PKG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
+COMP_RE = re.compile(r"^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$")
+
+
+def print_help():
+    print(
+        """Usage: agy-shizuku <command> [args]
+
+Commands:
+  status [--json]                     Show live Shizuku status via Gateway
+  diag [package] [--json]             Structured Android diagnostics (mem/gfx/batt/ANR)
+  anr [count]                         Extract recent ANR headers & main-thread traces (default 3)
+  logcat [package] [lines] [--all]    Read app warnings/errors or full logcat via uid=2000
+  install <apk> [flags]               Install APK via cmd package install -r (uid=2000)
+      Flags: --downgrade --grant --relaunch <comp> --self --dry-run
+  pkg <action> [arg]                  Manage packages via pm/am/dumpsys:
+      Actions: list [-3|-s], info <pkg>, path <pkg>, clear <pkg>,
+               force-stop <pkg>, enable <pkg>, disable <pkg>
+  exec <command...>                   Execute a privileged shell command via uid=2000"""
+    )
+
+
+def require_gateway():
+    port = os.environ.get("AGY_GW_PORT", "").strip()
+    token = os.environ.get("AGY_GW_TOKEN", "").strip()
+    if not port or not token:
+        sys.stderr.write("agy-shizuku: Antigravity Gateway port/token unavailable.\n")
+        sys.exit(1)
+    return port, token
+
+
+def gw_request(path, payload=None, timeout=30):
+    port, token = require_gateway()
+    url = f"http://127.0.0.1:{port}{path}"
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"X-AGY-Token": token}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data is not None else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            return e.code, json.loads(raw)
+        except Exception:
+            return e.code, {"ok": False, "error": f"HTTP {e.code}: {raw}"}
+    except Exception as e:
+        sys.stderr.write(f"agy-shizuku: Gateway request failed ({path}): {e}\n")
+        sys.exit(1)
+
+
+def gw_exec(cmd, mode="shizuku", timeout=35):
+    _, data = gw_request("/gateway/exec", {"cmd": cmd, "mode": mode, "source": "agy-shizuku"}, timeout=timeout)
+    return data
+
+
+def valid_pkg(pkg):
+    return bool(pkg and len(pkg) <= 160 and PKG_RE.match(pkg))
+
+
+def cmd_status(args):
+    as_json = "--json" in args
+    _, shiz = gw_request("/gateway/shizuku")
+    if as_json:
+        print(json.dumps(shiz, indent=2, ensure_ascii=False))
+        return 0 if shiz.get("ok") else 1
+    print(f"Shizuku ready     : {shiz.get('ready')} ({shiz.get('state')})")
+    print(f"Enabled           : {shiz.get('enabled')}")
+    print(f"Backend / Active  : {shiz.get('backend')} -> {shiz.get('active_transport')}")
+    print(f"Binder alive/perm : {shiz.get('binder_alive')} / {shiz.get('permission_granted')}")
+    print(f"UID / Version     : {shiz.get('uid')} / Shizuku v{shiz.get('shizuku_version')}")
+    print(f"rish_shizuku.dex  : {shiz.get('has_rish_dex')}")
+    return 0 if shiz.get("ok") else 1
+
+
+def parse_diag_sections(pkg, raw):
+    sections = {}
+    current = None
+    buf = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if s.startswith("===") and s.endswith("===") and len(s) > 6:
+            if current is not None:
+                sections[current] = "\n".join(buf)
+            current = s[3:-3]
+            buf = []
+        else:
+            buf.append(line)
+    if current is not None:
+        sections[current] = "\n".join(buf)
+
+    pkg_sec = sections.get("PKG", "")
+    vcode_m = re.search(r"versionCode=(\d+)", pkg_sec)
+    vname_m = re.search(r"versionName=([^\s]+)", pkg_sec)
+    upd_m = re.search(r"lastUpdateTime=(.+)", pkg_sec)
+
+    pid_raw = sections.get("PID", "").strip().split()
+    pid = int(pid_raw[0]) if pid_raw and pid_raw[0].isdigit() else None
+
+    batt_sec = sections.get("BATT", "")
+    lvl_m = re.search(r"(?m)^\s*level:\s*(\d+)", batt_sec)
+    volt_m = re.search(r"(?m)^\s*voltage:\s*(\d+)", batt_sec)
+    temp_m = re.search(r"(?m)^\s*temperature:\s*(-?\d+)", batt_sec)
+    stat_m = re.search(r"(?m)^\s*status:\s*(\d+)", batt_sec)
+
+    procs_raw = sections.get("PROCS", "").strip().split()
+    total_procs = int(procs_raw[0]) if procs_raw and procs_raw[0].isdigit() else None
+
+    mem_sec = sections.get("MEM", "")
+    pss_m = re.search(r"TOTAL PSS:\s*(\d+)", mem_sec)
+    rss_m = re.search(r"TOTAL RSS:\s*(\d+)", mem_sec)
+
+    gfx_sec = sections.get("GFX", "")
+    frames_m = re.search(r"Total frames rendered:\s*(\d+)", gfx_sec)
+    jank_m = re.search(r"Janky frames:\s*(\d+)\s*\(([\d.]+)%\)", gfx_sec)
+    p50_m = re.search(r"50th percentile:\s*(\d+)ms", gfx_sec)
+    p90_m = re.search(r"90th percentile:\s*(\d+)ms", gfx_sec)
+    p95_m = re.search(r"95th percentile:\s*(\d+)ms", gfx_sec)
+    p99_m = re.search(r"99th percentile:\s*(\d+)ms", gfx_sec)
+
+    anrs = [l.strip() for l in sections.get("ANR", "").splitlines() if l.strip()]
+
+    return {
+        "ok": True,
+        "package": pkg,
+        "version_name": vname_m.group(1) if vname_m else None,
+        "version_code": int(vcode_m.group(1)) if vcode_m else None,
+        "last_update_time": upd_m.group(1).strip() if upd_m else None,
+        "pid": pid,
+        "battery": {
+            "level": int(lvl_m.group(1)) if lvl_m else None,
+            "voltage_mv": int(volt_m.group(1)) if volt_m else None,
+            "temperature_c": round(int(temp_m.group(1)) / 10.0, 1) if temp_m else None,
+            "status": int(stat_m.group(1)) if stat_m else None,
+        },
+        "total_processes": total_procs,
+        "meminfo": {
+            "total_pss_kb": int(pss_m.group(1)) if pss_m else None,
+            "total_rss_kb": int(rss_m.group(1)) if rss_m else None,
+        },
+        "gfxinfo": {
+            "total_frames": int(frames_m.group(1)) if frames_m else None,
+            "janky_frames": int(jank_m.group(1)) if jank_m else None,
+            "janky_percent": float(jank_m.group(2)) if jank_m else None,
+            "p50_ms": int(p50_m.group(1)) if p50_m else None,
+            "p90_ms": int(p90_m.group(1)) if p90_m else None,
+            "p95_ms": int(p95_m.group(1)) if p95_m else None,
+            "p99_ms": int(p99_m.group(1)) if p99_m else None,
+        },
+        "recent_anrs": anrs,
+    }
+
+
+def cmd_diag(args):
+    as_json = "--json" in args
+    pos = [a for a in args if a != "--json"]
+    pkg = pos[0] if pos else DEFAULT_PKG
+    if not valid_pkg(pkg):
+        sys.stderr.write(f"agy-shizuku: invalid package name: {pkg}\n")
+        return 2
+
+    q_pkg = urllib.parse.quote(pkg, safe="")
+    status_code, data = gw_request(f"/gateway/shizuku/diag?pkg={q_pkg}")
+    if status_code >= 400 or "unknown_command" in data:
+        q = shlex.quote(pkg)
+        shell_diag = (
+            f"echo '===PKG==='; dumpsys package {q} | grep -E 'versionCode|versionName|lastUpdateTime' | head -n 5; "
+            f"echo '===PID==='; pidof {q} || true; "
+            "echo '===BATT==='; dumpsys battery | grep -E 'level:|voltage:|temperature:|status:'; "
+            "echo '===PROCS==='; ps -A | wc -l; "
+            f"echo '===MEM==='; dumpsys meminfo {q} | grep -E 'TOTAL PSS:|TOTAL:' | head -n 4; "
+            f"echo '===GFX==='; dumpsys gfxinfo {q} | head -n 20; "
+            "echo '===ANR==='; dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5"
+        )
+        res = gw_exec(shell_diag)
+        if not res.get("ok"):
+            if as_json:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            else:
+                sys.stderr.write(f"agy-shizuku: diag failed: {res.get('error') or res.get('stderr')}\n")
+            return 1
+        data = parse_diag_sections(pkg, res.get("stdout") or "")
+        data["transport"] = res.get("transport")
+        data["uid"] = res.get("uid")
+        data["duration_ms"] = res.get("duration_ms")
+
+    if as_json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return 0 if data.get("ok") else 1
+
+    if not data.get("ok"):
+        sys.stderr.write(f"agy-shizuku: diag error: {data.get('error')}\n")
+        return 1
+
+    batt = data.get("battery") or {}
+    mem = data.get("meminfo") or {}
+    gfx = data.get("gfxinfo") or {}
+    anrs = data.get("recent_anrs") or []
+    print(f"Package    : {data.get('package')} v{data.get('version_name')} (code {data.get('version_code')})")
+    print(f"Updated    : {data.get('last_update_time')}")
+    print(f"PID        : {data.get('pid')} (via {data.get('transport')}, uid={data.get('uid')}, {data.get('duration_ms')}ms)")
+    print(f"OS Procs   : {data.get('total_processes')}")
+    print(f"Battery    : {batt.get('level')}% | {batt.get('temperature_c')}C | {batt.get('voltage_mv')}mV | status={batt.get('status')}")
+    print(f"Memory     : PSS={mem.get('total_pss_kb')} KB | RSS={mem.get('total_rss_kb')} KB")
+    print(
+        f"Graphics   : frames={gfx.get('total_frames')} | jank={gfx.get('janky_frames')} "
+        f"({gfx.get('janky_percent')}%) | p50={gfx.get('p50_ms')}ms p90={gfx.get('p90_ms')}ms p99={gfx.get('p99_ms')}ms"
+    )
+    print(f"Recent ANR : {len(anrs)} entry(s)")
+    for entry in anrs:
+        print(f"  - {entry}")
+    return 0
+
+
+def cmd_anr(args):
+    count = 3
+    if args:
+        try:
+            count = max(1, min(10, int(args[0])))
+        except ValueError:
+            sys.stderr.write(f"agy-shizuku: invalid ANR count: {args[0]}\n")
+            return 2
+
+    awk_cmd = r"""dumpsys dropbox --print data_app_anr | awk '
+/^========================================/ { if (buf != "") print buf; buf=""; printed_main=0; in_main=0; next }
+/^20[0-9][0-9]-|^Process:|^Package:|^Subject:/ { buf = (buf == "" ? $0 : buf "\n" $0); next }
+/^"main" / && !printed_main { in_main=1; buf = buf "\n  " $0; next }
+in_main && /^  (native: #0[012]|at id\.vern|at android\.view\.Choreographer\.doFrame|  - waiting|  - locked)/ { buf = buf "\n  " $0 }
+in_main && /^$/ { in_main=0; printed_main=1 }
+END { if (buf != "") print buf }
+'"""
+    res = gw_exec(awk_cmd, timeout=30)
+    if not res.get("ok"):
+        sys.stderr.write(f"agy-shizuku: anr query failed: {res.get('error') or res.get('stderr')}\n")
+        return 1
+    stdout = res.get("stdout") or ""
+    blocks = []
+    cur = []
+    for line in stdout.splitlines():
+        if re.match(r"^20\d\d-\d\d-\d\d ", line) and cur:
+            blocks.append("\n".join(cur))
+            cur = [line]
+        else:
+            cur.append(line)
+    if cur:
+        blocks.append("\n".join(cur))
+    if not blocks:
+        print("No data_app_anr entries found in DropBox.")
+        return 0
+    for blk in blocks[-count:]:
+        print(blk)
+        print("-" * 60)
+    return 0
+
+
+def cmd_logcat(args):
+    show_all = "--all" in args
+    rest = [a for a in args if a != "--all"]
+    pkg = DEFAULT_PKG
+    lines = 30
+    for item in rest:
+        if item.isdigit():
+            lines = max(1, min(200, int(item)))
+        else:
+            pkg = item
+    if not valid_pkg(pkg):
+        sys.stderr.write(f"agy-shizuku: invalid package name: {pkg}\n")
+        return 2
+    q = shlex.quote(pkg)
+    lvl = "" if show_all else "*:W"
+    cmd = (
+        f"_pid=$(pidof {q} | awk '{{print $1}}'); "
+        f"[ -n \"$_pid\" ] || {{ echo \"Package {pkg} is not running\" >&2; exit 1; }}; "
+        f"logcat -d -v time --pid=\"$_pid\" {lvl} | grep -v 'audit(' | tail -n {lines}"
+    )
+    res = gw_exec(cmd)
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        sys.stderr.write(res["stderr"] + "\n")
+    return 0 if res.get("ok") else 1
+
+
+def cmd_install(args):
+    downgrade = False
+    grant = False
+    dry_run = False
+    relaunch = None
+    apk_path = None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--downgrade":
+            downgrade = True
+        elif a == "--grant":
+            grant = True
+        elif a == "--dry-run":
+            dry_run = True
+        elif a == "--self":
+            relaunch = DEFAULT_COMPONENT
+        elif a == "--relaunch":
+            if i + 1 >= len(args):
+                sys.stderr.write("agy-shizuku: --relaunch requires a component (pkg/Activity).\n")
+                return 2
+            relaunch = args[i + 1]
+            i += 1
+        elif a.startswith("-"):
+            sys.stderr.write(f"agy-shizuku: unknown install option: {a}\n")
+            return 2
+        elif apk_path is None:
+            apk_path = a
+        else:
+            sys.stderr.write(f"agy-shizuku: unexpected extra argument: {a}\n")
+            return 2
+        i += 1
+
+    if not apk_path:
+        sys.stderr.write("agy-shizuku: install requires <apk_path>.\n")
+        return 2
+    if relaunch and not COMP_RE.match(relaunch):
+        sys.stderr.write(f"agy-shizuku: invalid component name: {relaunch}\n")
+        return 2
+
+    real_apk = os.path.abspath(apk_path)
+    if not os.path.isfile(real_apk):
+        sys.stderr.write(f"agy-shizuku: APK file not found: {real_apk}\n")
+        return 1
+    with open(real_apk, "rb") as f:
+        magic = f.read(4)
+    if magic != b"PK\x03\x04":
+        sys.stderr.write(f"agy-shizuku: invalid APK (bad ZIP header): {real_apk}\n")
+        return 1
+
+    size = os.path.getsize(real_apk)
+    flags = ["-r"]
+    if downgrade:
+        flags.append("-d")
+    if grant:
+        flags.append("-g")
+    flags.extend(["-S", str(size)])
+
+    needs_stage = not (real_apk.startswith("/storage/emulated/0/") or real_apk.startswith("/sdcard/"))
+    staged_path = f"/storage/emulated/0/Download/.agy-shizuku-stage-{os.getpid()}.apk" if needs_stage else real_apk
+    install_cmd = f"cmd package install {' '.join(flags)} < {shlex.quote(staged_path)}"
+
+    if dry_run:
+        print(f"DRY RUN: valid APK ({size} bytes): {real_apk}")
+        print(f"Staging : {'yes -> ' + staged_path if needs_stage else 'no (direct shared storage read)'}")
+        if relaunch:
+            print(f"Relaunch: {relaunch} (detached)")
+        print(f"Command : {install_cmd}")
+        return 0
+
+    if needs_stage:
+        shutil.copy2(real_apk, staged_path)
+
+    if relaunch:
+        cleanup_cmd = f"rm -f {shlex.quote(staged_path)}; " if needs_stage else ""
+        inner = (
+            f"sleep 1; {install_cmd}; _rc=$?; {cleanup_cmd}"
+            f"if [ \"$_rc\" -eq 0 ]; then am start -n {shlex.quote(relaunch)} >/dev/null 2>&1; fi"
+        )
+        detached = f"nohup /system/bin/sh -c {shlex.quote(inner)} >/dev/null 2>&1 &"
+        res = gw_exec(detached, timeout=15)
+        if not res.get("ok"):
+            if needs_stage and os.path.exists(staged_path):
+                os.remove(staged_path)
+            sys.stderr.write(f"agy-shizuku: failed launching detached install: {res.get('error')}\n")
+            return 1
+        print(f"Detached install + relaunch scheduled for {real_apk} ({size} bytes).")
+        return 0
+
+    try:
+        res = gw_exec(install_cmd, timeout=60)
+        if res.get("stdout"):
+            print(res["stdout"])
+        if res.get("stderr"):
+            sys.stderr.write(res["stderr"] + "\n")
+        return 0 if res.get("ok") else 1
+    finally:
+        if needs_stage and os.path.exists(staged_path):
+            try:
+                os.remove(staged_path)
+            except OSError:
+                pass
+
+
+def cmd_pkg(args):
+    if not args:
+        sys.stderr.write("agy-shizuku: pkg requires an action (list|info|path|clear|force-stop|enable|disable).\n")
+        return 2
+    action = args[0]
+    arg = args[1] if len(args) > 1 else ""
+    if action == "list":
+        filter_flag = ""
+        if arg in ("-3", "-s"):
+            filter_flag = f" {arg}"
+        elif arg:
+            sys.stderr.write("agy-shizuku: pkg list only accepts optional -3 or -s.\n")
+            return 2
+        res = gw_exec(f"pm list packages{filter_flag}")
+    else:
+        if not valid_pkg(arg):
+            sys.stderr.write(f"agy-shizuku: valid package name required for 'pkg {action}'.\n")
+            return 2
+        q = shlex.quote(arg)
+        mapping = {
+            "info": f"dumpsys package {q} | grep -E 'Package \\[|versionCode|versionName|userId=|firstInstallTime|lastUpdateTime|dataDir=|codePath=' | head -n 15",
+            "path": f"pm path {q}",
+            "clear": f"pm clear {q}",
+            "force-stop": f"am force-stop {q}",
+            "enable": f"pm enable {q}",
+            "disable": f"pm disable-user --user 0 {q}",
+        }
+        if action not in mapping:
+            sys.stderr.write(f"agy-shizuku: unknown pkg action: {action}\n")
+            return 2
+        res = gw_exec(mapping[action])
+
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        sys.stderr.write(res["stderr"] + "\n")
+    elif not res.get("ok") and res.get("error"):
+        sys.stderr.write(f"agy-shizuku: {res['error']}\n")
+    return 0 if res.get("ok") else 1
+
+
+def cmd_exec(args):
+    if not args:
+        sys.stderr.write("agy-shizuku: exec requires a shell command.\n")
+        return 2
+    cmd = " ".join(args) if len(args) > 1 else args[0]
+    res = gw_exec(cmd)
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        sys.stderr.write(res["stderr"] + "\n")
+    elif not res.get("ok") and res.get("error"):
+        sys.stderr.write(f"agy-shizuku: {res['error']}\n")
+    if res.get("ok"):
+        return 0
+    rc = res.get("exit_code")
+    return rc if isinstance(rc, int) and rc > 0 else 1
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print_help()
+        return 0
+
+    sub = argv[0]
+    rest = argv[1:]
+    dispatch = {
+        "status": cmd_status,
+        "diag": cmd_diag,
+        "anr": cmd_anr,
+        "logcat": cmd_logcat,
+        "install": cmd_install,
+        "pkg": cmd_pkg,
+        "exec": cmd_exec,
+    }
+    handler = dispatch.get(sub)
+    if handler is None:
+        sys.stderr.write(f"agy-shizuku: unknown command '{sub}'. Run 'agy-shizuku --help'.\n")
+        return 2
+    return handler(rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYEOF
