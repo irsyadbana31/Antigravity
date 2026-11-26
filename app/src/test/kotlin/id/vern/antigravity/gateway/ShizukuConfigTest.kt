@@ -89,4 +89,37 @@ class ShizukuConfigTest {
         assertFalse(ShizukuConfig.isAuxiliaryUid(10148))
         assertFalse(ShizukuConfig.isAuxiliaryUid(-1))
     }
+
+    @Test
+    fun rishOverlayScript_avoidsUnqualifiedTermuxCoreutils() {
+        val rishFile = listOf(
+            java.io.File("src/main/assets/overlay/bin/rish"),
+            java.io.File("app/src/main/assets/overlay/bin/rish"),
+        ).first { it.isFile }
+        val content = rishFile.readText()
+        assertTrue(content.contains("unset LD_PRELOAD LD_LIBRARY_PATH"))
+        assertTrue(content.contains("exec /system/bin/app_process"))
+        assertTrue(content.contains("/system/bin/chmod"))
+
+        val shellLines = buildList {
+            var inPython = false
+            for (line in content.lineSequence()) {
+                val trimmed = line.trimStart()
+                if (trimmed.startsWith("PYEOF")) {
+                    inPython = false
+                    continue
+                }
+                if (inPython) continue
+                if (trimmed.contains("<<'PYEOF'")) {
+                    inPython = true
+                }
+                if (!trimmed.startsWith("#")) {
+                    add(line)
+                }
+            }
+        }.joinToString("\n")
+
+        assertFalse(Regex("""\b(dirname|sed|head|tr|env)\b""").containsMatchIn(shellLines))
+        assertFalse(content.contains("exec env"))
+    }
 }

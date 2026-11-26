@@ -1,6 +1,25 @@
 #!/system/bin/sh
 # Shizuku shell helper; respects Antigravity Settings -> Customizations toggle.
-BASEDIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+_trim_ws() {
+  _trimmed="$1"
+  while :; do
+    case "$_trimmed" in
+      " "*|"	"*) _trimmed="${_trimmed#?}" ;;
+      *) break ;;
+    esac
+  done
+  while :; do
+    case "$_trimmed" in
+      *" "|*"	") _trimmed="${_trimmed%?}" ;;
+      *) break ;;
+    esac
+  done
+}
+
+_script_dir="${0%/*}"
+[ "$_script_dir" = "$0" ] && _script_dir="."
+BASEDIR="$(CDPATH= cd -- "$_script_dir" 2>/dev/null && pwd)"
+unset _script_dir
 if [ -z "${PREFIX:-}" ]; then
   PREFIX="$(CDPATH= cd -- "$BASEDIR/.." 2>/dev/null && pwd)"
 fi
@@ -10,11 +29,29 @@ SHIZUKU_CONF="$FILES_DIR/logs/shizuku.conf"
 SHIZUKU_ENABLED="${AGY_SHIZUKU_ENABLED:-0}"
 SHIZUKU_BACKEND="${AGY_SHIZUKU_BACKEND:-auto}"
 if [ -r "$SHIZUKU_CONF" ]; then
-  _conf_en="$(sed -n 's/^SHIZUKU_ENABLED=//p' "$SHIZUKU_CONF" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
-  _conf_bk="$(sed -n 's/^SHIZUKU_BACKEND=//p' "$SHIZUKU_CONF" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  _conf_en=""
+  _conf_bk=""
+  while IFS='=' read -r _k _v || [ -n "$_k" ]; do
+    _trim_ws "$_k"
+    _k="$_trimmed"
+    case "$_k" in
+      SHIZUKU_ENABLED)
+        if [ -z "$_conf_en" ]; then
+          _trim_ws "$_v"
+          _conf_en="$_trimmed"
+        fi
+        ;;
+      SHIZUKU_BACKEND)
+        if [ -z "$_conf_bk" ]; then
+          _trim_ws "$_v"
+          _conf_bk="$_trimmed"
+        fi
+        ;;
+    esac
+  done < "$SHIZUKU_CONF" 2>/dev/null
   [ -n "$_conf_en" ] && SHIZUKU_ENABLED="$_conf_en"
   [ -n "$_conf_bk" ] && SHIZUKU_BACKEND="$_conf_bk"
-  unset _conf_en _conf_bk
+  unset _k _v _conf_en _conf_bk _trimmed
 fi
 
 if [ "$SHIZUKU_ENABLED" != "1" ]; then
@@ -30,8 +67,20 @@ for d in "$BASEDIR" "$BASEDIR/../share/rish" "$PREFIX/share/rish" "$PREFIX/../ru
   fi
 done
 
-GATEWAY_PORT="${AGY_GATEWAY_PORT:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.port" 2>/dev/null || true)}"
-GATEWAY_TOKEN="${AGY_GATEWAY_TOKEN:-$(tr -d '[:space:]' < "$FILES_DIR/logs/gateway.token" 2>/dev/null || true)}"
+GATEWAY_PORT="${AGY_GATEWAY_PORT:-}"
+if [ -z "$GATEWAY_PORT" ] && [ -r "$FILES_DIR/logs/gateway.port" ]; then
+  IFS= read -r _gw_raw < "$FILES_DIR/logs/gateway.port" 2>/dev/null || true
+  _trim_ws "$_gw_raw"
+  GATEWAY_PORT="$_trimmed"
+  unset _gw_raw _trimmed
+fi
+GATEWAY_TOKEN="${AGY_GATEWAY_TOKEN:-}"
+if [ -z "$GATEWAY_TOKEN" ] && [ -r "$FILES_DIR/logs/gateway.token" ]; then
+  IFS= read -r _gw_raw < "$FILES_DIR/logs/gateway.token" 2>/dev/null || true
+  _trim_ws "$_gw_raw"
+  GATEWAY_TOKEN="$_trimmed"
+  unset _gw_raw _trimmed
+fi
 PYTHON_BIN=""
 if [ -x "$PREFIX/bin/python3" ]; then
   PYTHON_BIN="$PREFIX/bin/python3"
@@ -42,7 +91,9 @@ fi
 if [ "${AGY_RISH_DIRECT:-0}" != "1" ] && [ "$#" -eq 2 ] && [ "$1" = "-c" ] && [ "$SHIZUKU_BACKEND" != "rish" ]; then
   if [ "$SHIZUKU_BACKEND" = "binder" ] || [ -z "$DEX" ] || { [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ]; }; then
     if [ -n "$GATEWAY_PORT" ] && [ -n "$GATEWAY_TOKEN" ] && [ -n "$PYTHON_BIN" ]; then
-      AGY_GW_PORT="$GATEWAY_PORT" AGY_GW_TOKEN="$GATEWAY_TOKEN" "$PYTHON_BIN" - "$2" <<'PYEOF'
+      _py_dir="${PYTHON_BIN%/*}"
+      _py_lib="${_py_dir%/bin}/lib"
+      AGY_GW_PORT="$GATEWAY_PORT" AGY_GW_TOKEN="$GATEWAY_TOKEN" LD_LIBRARY_PATH="${_py_lib}:$PREFIX/lib:/system/lib64" "$PYTHON_BIN" - "$2" <<'PYEOF'
 import json, os, sys, urllib.request
 
 cmd = sys.argv[1]
@@ -105,7 +156,7 @@ fi
 SDK=$(/system/bin/getprop ro.build.version.sdk 2>/dev/null || echo 0)
 if [ "$SDK" -ge 34 ]; then
   if [ -w "$DEX" ]; then
-    chmod 400 "$DEX" 2>/dev/null
+    /system/bin/chmod 400 "$DEX" 2>/dev/null
   fi
   if [ -w "$DEX" ]; then
     echo "Cannot remove the write permission of $DEX." >&2
@@ -125,4 +176,5 @@ if [ -z "$RISH_APPLICATION_ID" ]; then
   exit 1
 fi
 export RISH_APPLICATION_ID
-exec env -u LD_PRELOAD -u LD_LIBRARY_PATH /system/bin/app_process -Djava.class.path="$DEX" /system/bin --nice-name=rish rikka.shizuku.shell.ShizukuShellLoader "$@"
+unset LD_PRELOAD LD_LIBRARY_PATH
+exec /system/bin/app_process -Djava.class.path="$DEX" /system/bin --nice-name=rish rikka.shizuku.shell.ShizukuShellLoader "$@"

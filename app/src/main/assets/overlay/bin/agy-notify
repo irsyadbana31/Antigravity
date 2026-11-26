@@ -22,10 +22,35 @@ elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python3)"
 fi
 
+_agy_trim_ws() {
+    _trimmed="$1"
+    while :; do
+        case "$_trimmed" in
+            " "*|"	"*) _trimmed="${_trimmed#?}" ;;
+            *) break ;;
+        esac
+    done
+    while :; do
+        case "$_trimmed" in
+            *" "|*"	") _trimmed="${_trimmed%?}" ;;
+            *) break ;;
+        esac
+    done
+}
+
 is_shizuku_enabled() {
     _conf="$FILES_DIR/logs/shizuku.conf"
     if [ -r "$_conf" ]; then
-        _val="$(sed -n 's/^SHIZUKU_ENABLED=//p' "$_conf" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+        _val=""
+        while IFS='=' read -r _k _v || [ -n "$_k" ]; do
+            _agy_trim_ws "$_k"
+            if [ "$_trimmed" = "SHIZUKU_ENABLED" ]; then
+                _agy_trim_ws "$_v"
+                _val="$_trimmed"
+                break
+            fi
+        done < "$_conf" 2>/dev/null
+        unset _k _v _trimmed
         [ "$_val" = "1" ]
         return $?
     fi
