@@ -7,10 +7,13 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.BorderStroke
@@ -19,6 +22,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +34,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Difference
@@ -52,7 +58,6 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -93,12 +98,14 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
@@ -110,6 +117,7 @@ import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.service.TerminalSessionManager
 import id.vern.antigravity.service.TerminalLine
+import id.vern.antigravity.util.ExternalFileOpener
 import id.vern.antigravity.viewmodel.AntigravityViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -131,102 +139,12 @@ fun AgentDetailsBottomSheet(
     viewModel: AntigravityViewModel,
     initialTab: Int = 0,
     initialFileToOpen: String? = null,
+    onInitialFileConsumed: () -> Unit = {},
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(initialTab) }
-    val openEditorTabs by viewModel.openEditorTabs.collectAsStateWithLifecycle()
-    val activeEditorTabId by viewModel.activeEditorTabId.collectAsStateWithLifecycle()
-    val activeEditorTab = openEditorTabs.find { it.id == activeEditorTabId }
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val workspacePath by viewModel.workspacePath.collectAsStateWithLifecycle()
-    val projectList by viewModel.projectList.collectAsStateWithLifecycle()
-    val runningTasks by viewModel.runningTasks.collectAsStateWithLifecycle()
-    val runningSubagents by viewModel.runningSubagents.collectAsStateWithLifecycle()
-    val daemonTasks by viewModel.daemonTasks.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        viewModel.loadDaemonTasks(context)
-        viewModel.refreshConversationArtifacts(context)
-    }
-
-    LaunchedEffect(initialFileToOpen) {
-        if (!initialFileToOpen.isNullOrBlank()) {
-            val fileToLoad = FileResolver.resolveTargetFile(
-                pathOrName = initialFileToOpen,
-                workspacePath = workspacePath,
-                projectList = projectList,
-                context = context
-            )
-            if (fileToLoad != null) {
-                viewModel.openFileInEditor(fileToLoad)
-                selectedTab = 3
-            }
-        }
-    }
-
-    val filesChanged by viewModel.gitChangedFiles.collectAsStateWithLifecycle()
-    var uploadsList by remember { mutableStateOf<List<UploadedMediaItem>>(emptyList()) }
-    var skillsList by remember { mutableStateOf<List<InstalledSkillItem>>(emptyList()) }
-    val artifactsList by viewModel.conversationArtifacts.collectAsStateWithLifecycle()
-
-    var expandedFiles by remember { mutableStateOf(true) }
-    var expandedUploads by remember { mutableStateOf(true) }
-    var expandedSkills by remember { mutableStateOf(true) }
-    var expandedArtifacts by remember { mutableStateOf(false) }
-    var expandedSubagents by remember { mutableStateOf(false) }
-    var expandedTasks by remember { mutableStateOf(false) }
-
-    var showAllUploadsDialog by remember { mutableStateOf(false) }
-
-    var isReviewSearching by remember { mutableStateOf(false) }
-    var reviewSearchQuery by remember { mutableStateOf("") }
-    var showReviewFilterMenu by remember { mutableStateOf(false) }
-    var reviewFilterType by remember { mutableStateOf("All") }
-    var showReviewMoreMenu by remember { mutableStateOf(false) }
-    var expandAllDiffs by remember { mutableStateOf(false) }
-    val fileDiffCache by viewModel.gitDiffCache.collectAsStateWithLifecycle()
-    val loadingDiffs by viewModel.gitLoadingDiffs.collectAsStateWithLifecycle()
-
-    var showTerminalSessionsMenu by remember { mutableStateOf(false) }
-    var showTerminalMoreMenu by remember { mutableStateOf(false) }
-    var showWorkspacePickerMenu by remember { mutableStateOf(false) }
-
-    val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
-    val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
-    val installedSkills by viewModel.installedSkills.collectAsStateWithLifecycle()
-
-    val reloadWorkspaceData: () -> Unit = {
-        scope.launch(Dispatchers.IO) {
-
-            viewModel.fetchGitChangedFiles(context, workspacePath)
-
-            val currentUploads = mutableListOf<UploadedMediaItem>()
-            val msgAttachments = chatMessages.flatMap { it.attachments }
-            val combined = (msgAttachments + attachedFiles).distinctBy { it.uri.toString() }
-            for (att in combined) {
-                currentUploads.add(UploadedMediaItem(att.name, att.uri.toString()))
-            }
-            uploadsList = currentUploads
-
-            val currentSkills = viewModel.getInstalledSkills(context).map {
-                InstalledSkillItem(it.name, it.path ?: "builtin")
-            }
-            skillsList = currentSkills
-
-            viewModel.refreshConversationArtifacts(context)
-        }
-    }
-
-    LaunchedEffect(workspacePath, chatMessages, attachedFiles, installedSkills) {
-        val isProjectOpen = !workspacePath.isNullOrBlank() && File(workspacePath ?: "").isDirectory
-        if (!isProjectOpen && selectedTab == 3 && activeEditorTab == null) {
-            selectedTab = 0
-        }
-        reloadWorkspaceData()
-    }
 
     val blockSheetScrollConnection = remember {
         object : NestedScrollConnection {
@@ -236,15 +154,9 @@ fun AgentDetailsBottomSheet(
                 consumed: Offset,
                 available: Offset,
                 source: NestedScrollSource
-            ): Offset {
+            ): Offset = available
 
-                return available
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-
-                return available
-            }
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
         }
     }
 
@@ -272,23 +184,171 @@ fun AgentDetailsBottomSheet(
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         modifier = modifier.fillMaxWidth()
     ) {
-        BackHandler(enabled = activeEditorTab != null) {
-            if (activeEditorTab != null) {
-                viewModel.closeEditorTab(activeEditorTab.id)
-            }
-        }
-
-        Column(
+        AgentDetailsPanelContent(
+            viewModel = viewModel,
+            selectedTab = selectedTab,
+            onSelectTab = { selectedTab = it },
+            initialFileToOpen = initialFileToOpen,
+            onInitialFileConsumed = onInitialFileConsumed,
+            isDockedPanel = false,
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.92f)
                 .nestedScroll(blockSheetScrollConnection)
-        ) {
+        )
+    }
+}
+
+@Composable
+fun AgentDetailsPanelContent(
+    viewModel: AntigravityViewModel,
+    selectedTab: Int,
+    onSelectTab: (Int) -> Unit,
+    initialFileToOpen: String? = null,
+    onInitialFileConsumed: () -> Unit = {},
+    isDockedPanel: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val openEditorTabs by viewModel.openEditorTabs.collectAsStateWithLifecycle()
+    val activeEditorTabId by viewModel.activeEditorTabId.collectAsStateWithLifecycle()
+    val activeEditorTab = openEditorTabs.find { it.id == activeEditorTabId }
+    val workspacePath by viewModel.workspacePath.collectAsStateWithLifecycle()
+    val projectList by viewModel.projectList.collectAsStateWithLifecycle()
+    val runningTasks by viewModel.runningTasks.collectAsStateWithLifecycle()
+    val runningSubagents by viewModel.runningSubagents.collectAsStateWithLifecycle()
+    val daemonTasks by viewModel.daemonTasks.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadDaemonTasks(context)
+        viewModel.refreshConversationArtifacts(context)
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 2) {
+            if (viewModel.isExecuting.value || EngineExecutor.isAgyRunning()) {
+                TerminalSessionManager.ensureAgyLiveSession(autoSwitch = true)
+            } else {
+                TerminalSessionManager.ensureBionicSession(autoSwitch = true)
+            }
+        }
+    }
+
+    LaunchedEffect(initialFileToOpen) {
+        if (!initialFileToOpen.isNullOrBlank()) {
+            val fileToLoad = FileResolver.resolveTargetFile(
+                pathOrName = initialFileToOpen,
+                workspacePath = workspacePath,
+                projectList = projectList,
+                context = context
+            )
+            if (fileToLoad != null) {
+                if (ExternalFileOpener.isExternalBinaryFile(fileToLoad)) {
+                    ExternalFileOpener.openFile(context, fileToLoad)
+                } else {
+                    viewModel.openFileInEditor(fileToLoad)
+                    onSelectTab(3)
+                }
+            }
+            onInitialFileConsumed()
+        }
+    }
+
+    val filesChanged by viewModel.gitChangedFiles.collectAsStateWithLifecycle()
+    var uploadsList by remember { mutableStateOf<List<UploadedMediaItem>>(emptyList()) }
+    var skillsList by remember { mutableStateOf<List<InstalledSkillItem>>(emptyList()) }
+    val artifactsList by viewModel.conversationArtifacts.collectAsStateWithLifecycle()
+
+    var expandedFiles by remember { mutableStateOf(true) }
+    var expandedUploads by remember { mutableStateOf(true) }
+    var expandedSkills by remember { mutableStateOf(true) }
+    var expandedArtifacts by remember { mutableStateOf(false) }
+    var expandedSubagents by remember { mutableStateOf(false) }
+    var expandedTasks by remember { mutableStateOf(false) }
+
+    var showAllUploadsDialog by remember { mutableStateOf(false) }
+
+    var isReviewSearching by remember { mutableStateOf(false) }
+    var reviewSearchQuery by remember { mutableStateOf("") }
+    var showReviewFilterMenu by remember { mutableStateOf(false) }
+    var reviewFilterType by remember { mutableStateOf("all") }
+    var showReviewMoreMenu by remember { mutableStateOf(false) }
+    var expandAllDiffs by remember { mutableStateOf(false) }
+    val fileDiffCache by viewModel.gitDiffCache.collectAsStateWithLifecycle()
+    val loadingDiffs by viewModel.gitLoadingDiffs.collectAsStateWithLifecycle()
+
+    var showTerminalSessionsMenu by remember { mutableStateOf(false) }
+    var showTerminalMoreMenu by remember { mutableStateOf(false) }
+    var showWorkspacePickerMenu by remember { mutableStateOf(false) }
+
+    val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
+    val installedSkills by viewModel.installedSkills.collectAsStateWithLifecycle()
+
+    val reloadWorkspaceData: () -> Unit = {
+        scope.launch(Dispatchers.IO) {
+            viewModel.fetchGitChangedFiles(context, workspacePath)
+
+            val currentUploads = mutableListOf<UploadedMediaItem>()
+            val msgAttachments = chatMessages.flatMap { it.attachments }
+            val combined = (msgAttachments + attachedFiles).distinctBy { it.uri.toString() }
+            for (att in combined) {
+                currentUploads.add(UploadedMediaItem(att.name, att.uri.toString()))
+            }
+            uploadsList = currentUploads
+
+            val currentSkills = viewModel.getInstalledSkills(context).map {
+                InstalledSkillItem(it.name, it.path ?: "builtin")
+            }
+            skillsList = currentSkills
+
+            viewModel.refreshConversationArtifacts(context)
+        }
+    }
+
+    LaunchedEffect(workspacePath, chatMessages, attachedFiles, installedSkills) {
+        reloadWorkspaceData()
+    }
+
+    BackHandler(enabled = activeEditorTab != null && selectedTab == 3) {
+        if (activeEditorTab != null) {
+            viewModel.closeEditorTab(activeEditorTab.id)
+        }
+    }
+
+    val isCompactHeight = isDockedPanel && LocalConfiguration.current.screenHeightDp < 430
+    val dockedHeaderHeight = if (isCompactHeight) 42.dp else 48.dp
+
+    val activeTabTitle = when (selectedTab) {
+        0 -> stringResource(R.string.agent_tab_overview)
+        1 -> stringResource(R.string.agent_tab_review)
+        2 -> stringResource(R.string.agent_tab_terminals)
+        else -> activeEditorTab?.title ?: stringResource(R.string.agent_tab_files)
+    }
+
+    Column(modifier = modifier) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isNarrowPanel = isDockedPanel && maxWidth < 260.dp
+            val pillBtnSize = when {
+                isNarrowPanel -> 28.dp
+                isDockedPanel && isCompactHeight -> 30.dp
+                else -> 32.dp
+            }
+            val pillGap = if (isNarrowPanel) 2.dp else 3.dp
+            val pillBarHeight = pillBtnSize + 6.dp
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                modifier = if (isDockedPanel) {
+                    Modifier
+                        .fillMaxWidth()
+                        .height(dockedHeaderHeight)
+                        .padding(horizontal = if (isNarrowPanel) 8.dp else 12.dp)
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -296,7 +356,7 @@ fun AgentDetailsBottomSheet(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-                    modifier = Modifier.height(42.dp)
+                    modifier = Modifier.height(pillBarHeight)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -306,53 +366,66 @@ fun AgentDetailsBottomSheet(
                             selected = selectedTab == 0,
                             icon = Icons.AutoMirrored.Filled.Article,
                             contentDescription = stringResource(R.string.agent_tab_overview),
-                            onClick = { selectedTab = 0 }
+                            buttonSize = pillBtnSize,
+                            onClick = { onSelectTab(0) }
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(pillGap))
                         TabPillButton(
                             selected = selectedTab == 1,
                             icon = Icons.Default.Difference,
                             contentDescription = stringResource(R.string.agent_tab_review),
-                            onClick = { selectedTab = 1 }
+                            buttonSize = pillBtnSize,
+                            onClick = { onSelectTab(1) }
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(pillGap))
                         TabPillButton(
                             selected = selectedTab == 2,
                             icon = Icons.Default.Terminal,
                             contentDescription = stringResource(R.string.agent_tab_terminals),
-                            onClick = {
-                                selectedTab = 2
-                                if (viewModel.isExecuting.value || EngineExecutor.isAgyRunning()) {
-                                    TerminalSessionManager.ensureAgyLiveSession(autoSwitch = true)
-                                } else {
-                                    TerminalSessionManager.ensureBionicSession(autoSwitch = true)
-                                }
-                            }
+                            buttonSize = pillBtnSize,
+                            onClick = { onSelectTab(2) }
                         )
-                        if (!workspacePath.isNullOrBlank() && File(workspacePath ?: "").isDirectory) {
-                            Spacer(modifier = Modifier.width(3.dp))
-                            TabPillButton(
-                                selected = selectedTab == 3,
-                                icon = Icons.Default.Folder,
-                                contentDescription = stringResource(R.string.agent_tab_files),
-                                onClick = { selectedTab = 3 }
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(pillGap))
+                        TabPillButton(
+                            selected = selectedTab == 3,
+                            icon = Icons.Default.Folder,
+                            contentDescription = stringResource(R.string.agent_tab_files),
+                            buttonSize = pillBtnSize,
+                            onClick = { onSelectTab(3) }
+                        )
                     }
                 }
+
+                if (isDockedPanel) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = activeTabTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
             }
+        }
 
+        if (isDockedPanel) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        } else {
             Spacer(modifier = Modifier.height(4.dp))
+        }
 
-            AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(200))
-                },
-                label = "AgentDetailsTabTransition",
-                modifier = Modifier.fillMaxSize()
-            ) { targetTab ->
-                when (targetTab) {
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(200))
+            },
+            label = "AgentDetailsTabTransition",
+            modifier = Modifier.fillMaxSize()
+        ) { targetTab ->
+            when (targetTab) {
                 0 -> {
 
                     LazyColumn(
@@ -399,10 +472,10 @@ fun AgentDetailsBottomSheet(
                                             )
                                         } else {
                                             Icon(
-                                                imageVector = Icons.Default.SmartToy,
+                                                imageVector = Icons.Default.CheckCircle,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.primary
+                                                tint = AntigravityGreen
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
@@ -442,10 +515,7 @@ fun AgentDetailsBottomSheet(
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
-                                                selectedTab = 2
-                                                if (viewModel.isExecuting.value) {
-                                                    TerminalSessionManager.ensureAgyLiveSession(autoSwitch = true)
-                                                }
+                                                onSelectTab(2)
                                             }
                                             .padding(horizontal = 20.dp, vertical = 8.dp)
                                     ) {
@@ -510,12 +580,17 @@ fun AgentDetailsBottomSheet(
                                             .clip(RoundedCornerShape(6.dp))
                                             .clickable {
                                                 val ws = workspacePath
-                                                val target = if (!ws.isNullOrBlank()) File(ws, file.relativePath) else File(file.relativePath)
+                                                val relFilePath = if (file.relativePath.isNotBlank()) "${file.relativePath}/${file.name}" else file.name
+                                                val target = if (!ws.isNullOrBlank()) File(ws, relFilePath) else File(relFilePath)
                                                 if (target.exists() && target.isFile) {
-                                                    viewModel.openFileInEditor(target)
-                                                    selectedTab = 3
+                                                    if (ExternalFileOpener.isExternalBinaryFile(target)) {
+                                                        ExternalFileOpener.openFile(context, target)
+                                                    } else {
+                                                        viewModel.openFileInEditor(target)
+                                                        onSelectTab(3)
+                                                    }
                                                 } else {
-                                                    selectedTab = 1
+                                                    onSelectTab(1)
                                                 }
                                             }
                                             .padding(horizontal = 20.dp, vertical = 6.dp)
@@ -541,7 +616,7 @@ fun AgentDetailsBottomSheet(
                                 if (filesChanged.size > 8) {
                                     item {
                                         TextButton(
-                                            onClick = { selectedTab = 1 },
+                                            onClick = { onSelectTab(1) },
                                             modifier = Modifier.padding(start = 16.dp)
                                         ) {
                                             Text(
@@ -583,8 +658,12 @@ fun AgentDetailsBottomSheet(
                                             .clickable {
                                                 val target = File(art.filePath)
                                                 if (target.exists() && target.isFile) {
-                                                    viewModel.openFileInEditor(target)
-                                                    selectedTab = 3
+                                                    if (ExternalFileOpener.isExternalBinaryFile(target)) {
+                                                        ExternalFileOpener.openFile(context, target)
+                                                    } else {
+                                                        viewModel.openFileInEditor(target)
+                                                        onSelectTab(3)
+                                                    }
                                                 }
                                             }
                                             .padding(horizontal = 20.dp, vertical = 6.dp)
@@ -819,12 +898,7 @@ fun AgentDetailsBottomSheet(
                                 count = TerminalSessionManager.sessionNames.size,
                                 isExpanded = false,
                                 onToggle = {
-                                    selectedTab = 2
-                                    if (viewModel.isExecuting.value || EngineExecutor.isAgyRunning()) {
-                                        TerminalSessionManager.ensureAgyLiveSession(autoSwitch = true)
-                                    } else {
-                                        TerminalSessionManager.ensureBionicSession(autoSwitch = true)
-                                    }
+                                    onSelectTab(2)
                                 }
                             )
                         }
@@ -891,35 +965,44 @@ fun AgentDetailsBottomSheet(
                                 file.name.contains(reviewSearchQuery, ignoreCase = true) ||
                                 file.relativePath.contains(reviewSearchQuery, ignoreCase = true)
                             val matchFilter = when (reviewFilterType) {
-                                "Kotlin" -> file.name.endsWith(".kt") || file.name.endsWith(".kts")
-                                "Config" -> file.name.endsWith(".json") || file.name.endsWith(".xml") || file.name.endsWith(".gradle")
-                                "Markdown" -> file.name.endsWith(".md")
+                                "kotlin" -> file.name.endsWith(".kt") || file.name.endsWith(".kts")
+                                "config" -> file.name.endsWith(".json") || file.name.endsWith(".xml") || file.name.endsWith(".gradle")
+                                "markdown" -> file.name.endsWith(".md")
                                 else -> true
                             }
                             matchSearch && matchFilter
                         }
                     }
 
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    val filterOptions = listOf(
+                        "all" to R.string.agent_review_filter_all,
+                        "kotlin" to R.string.agent_review_filter_kotlin,
+                        "config" to R.string.agent_review_filter_config,
+                        "markdown" to R.string.agent_review_filter_markdown
+                    )
 
+                    Column(modifier = Modifier.fillMaxSize()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .padding(horizontal = if (isDockedPanel) 12.dp else 16.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Review (${filteredFiles.size}/${filesChanged.size})",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = stringResource(R.string.agent_review_header_count, filteredFiles.size, filesChanged.size),
+                                style = if (isDockedPanel) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
 
                                 IconButton(
                                     onClick = { isReviewSearching = !isReviewSearching },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Search,
@@ -932,12 +1015,12 @@ fun AgentDetailsBottomSheet(
                                 Box {
                                     IconButton(
                                         onClick = { showReviewFilterMenu = true },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.List,
                                             contentDescription = stringResource(R.string.common_filter),
-                                            tint = if (reviewFilterType != "All") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = if (reviewFilterType != "all") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -947,11 +1030,11 @@ fun AgentDetailsBottomSheet(
                                         shape = RoundedCornerShape(16.dp),
                                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                                     ) {
-                                        listOf("All", "Kotlin", "Config", "Markdown").forEach { f ->
+                                        filterOptions.forEach { (key, labelRes) ->
                                             DropdownMenuItem(
-                                                text = { Text(f, fontSize = 13.sp) },
+                                                text = { Text(stringResource(labelRes), fontSize = 13.sp) },
                                                 onClick = {
-                                                    reviewFilterType = f
+                                                    reviewFilterType = key
                                                     showReviewFilterMenu = false
                                                 }
                                             )
@@ -962,7 +1045,7 @@ fun AgentDetailsBottomSheet(
                                 Box {
                                     IconButton(
                                         onClick = { showReviewMoreMenu = true },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             Icons.Default.MoreVert,
@@ -984,11 +1067,18 @@ fun AgentDetailsBottomSheet(
                                                 viewModel.clearGitDiffCache()
                                                 reloadWorkspaceData()
                                                 showReviewMoreMenu = false
-                                                Toast.makeText(context, "Workspace diff refreshed", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, context.getString(R.string.agent_review_diff_refreshed), Toast.LENGTH_SHORT).show()
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text(if (expandAllDiffs) "Collapse All" else "Expand All", fontSize = 13.sp) },
+                                            text = {
+                                                Text(
+                                                    stringResource(
+                                                        if (expandAllDiffs) R.string.agent_review_collapse_all else R.string.agent_review_expand_all
+                                                    ),
+                                                    fontSize = 13.sp
+                                                )
+                                            },
                                             onClick = {
                                                 expandAllDiffs = !expandAllDiffs
                                                 showReviewMoreMenu = false
@@ -999,7 +1089,11 @@ fun AgentDetailsBottomSheet(
                             }
                         }
 
-                        if (isReviewSearching) {
+                        AnimatedVisibility(
+                            visible = isReviewSearching,
+                            enter = expandVertically(animationSpec = tween(180)) + fadeIn(tween(150)),
+                            exit = shrinkVertically(animationSpec = tween(150)) + fadeOut(tween(120))
+                        ) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1043,7 +1137,9 @@ fun AgentDetailsBottomSheet(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = if (reviewSearchQuery.isNotEmpty()) "No matching modified files found." else "No modified files in workspace to review.",
+                                            text = stringResource(
+                                                if (reviewSearchQuery.isNotEmpty()) R.string.agent_review_empty_search else R.string.agent_review_empty
+                                            ),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1161,16 +1257,26 @@ fun AgentDetailsBottomSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = stringResource(R.string.agent_tab_terminals),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                .padding(
+                                    horizontal = if (isDockedPanel) 12.dp else 16.dp,
+                                    vertical = if (isDockedPanel) 4.dp else 6.dp
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 6.dp)
+                            ) {
+                                if (!isDockedPanel) {
+                                    Text(
+                                        text = stringResource(R.string.agent_tab_terminals),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                }
 
                                 Box {
                                     Surface(
@@ -1203,7 +1309,9 @@ fun AgentDetailsBottomSheet(
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Icon(
@@ -1368,37 +1476,75 @@ fun AgentDetailsBottomSheet(
                     }
                 }
                 3 -> {
+                    val effectiveRootDir = remember(workspacePath) {
+                        val wsDir = workspacePath?.takeIf { it.isNotBlank() }?.let { File(it) }
+                        if (wsDir != null && wsDir.exists() && wsDir.isDirectory) {
+                            wsDir
+                        } else {
+                            val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                            if (docs != null && docs.exists()) docs else (Environment.getExternalStorageDirectory() ?: File("/"))
+                        }
+                    }
 
-                    val rootDir = remember(workspacePath) { File(workspacePath ?: "") }
-                    val currentTab = activeEditorTab
-                    if (currentTab == null) {
-                        FileTree(
-                            rootDirectory = rootDir,
-                            onFileSelected = { file ->
-                                if (file.isFile) {
-                                    viewModel.openFileInEditor(file)
+                    AnimatedContent(
+                        targetState = activeEditorTab,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(160))
+                        },
+                        label = "AgentFilesEditorTransition",
+                        modifier = Modifier.fillMaxSize()
+                    ) { currentTab ->
+                        if (currentTab == null) {
+                            FileTree(
+                                rootDirectory = effectiveRootDir,
+                                onFileSelected = { file ->
+                                    if (file.isFile) {
+                                        if (ExternalFileOpener.isExternalBinaryFile(file)) {
+                                            ExternalFileOpener.openFile(context, file)
+                                        } else {
+                                            viewModel.openFileInEditor(file)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (currentTab.isDiffView) {
+                            DiffViewer(
+                                fileName = currentTab.title,
+                                originalText = currentTab.originalContent,
+                                modifiedText = currentTab.content,
+                                onApplyChanges = {
+                                    currentTab.file.writeText(currentTab.content)
+                                    viewModel.updateEditorContent(currentTab.id, currentTab.content)
+                                    viewModel.saveEditorTab(context, currentTab.id)
+                                },
+                                onDiscardChanges = {
+                                    viewModel.updateEditorContent(currentTab.id, currentTab.originalContent)
+                                },
+                                onBack = {
+                                    viewModel.setEditorTabDiffView(currentTab.id, false)
                                 }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        CodeEditor(
-                            tab = currentTab,
-                            onSaveFile = { file, newContent ->
-                                viewModel.updateEditorContent(currentTab.id, newContent)
-                                viewModel.saveEditorTab(context, currentTab.id)
-                            },
-                            onCloseTab = {
-                                viewModel.closeEditorTab(currentTab.id)
-                            },
-                            onToggleDiff = {},
-                            modifier = Modifier.fillMaxSize()
-                        )
+                            )
+                        } else {
+                            CodeEditor(
+                                tab = currentTab,
+                                onSaveFile = { _, newContent ->
+                                    viewModel.updateEditorContent(currentTab.id, newContent)
+                                    viewModel.saveEditorTab(context, currentTab.id)
+                                },
+                                onCloseTab = {
+                                    viewModel.closeEditorTab(currentTab.id)
+                                },
+                                onToggleDiff = {
+                                    viewModel.setEditorTabDiffView(currentTab.id, true)
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
         }
-    }
     }
 
     if (showAllUploadsDialog) {
@@ -1443,13 +1589,14 @@ fun TabPillButton(
     selected: Boolean,
     icon: ImageVector,
     contentDescription: String,
+    buttonSize: Dp = 32.dp,
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(7.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         modifier = Modifier
-            .size(36.dp)
+            .size(buttonSize)
             .clickable(onClick = onClick)
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -1457,7 +1604,7 @@ fun TabPillButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(if (buttonSize < 30.dp) 16.dp else 18.dp)
             )
         }
     }
@@ -1470,6 +1617,7 @@ fun AccordionHeader(
     isExpanded: Boolean,
     onToggle: () -> Unit
 ) {
+    val isCompactHeight = LocalConfiguration.current.screenHeightDp < 430
     val arrowRotation by animateFloatAsState(
         targetValue = if (isExpanded) 0f else -90f,
         animationSpec = tween(durationMillis = 200),
@@ -1480,16 +1628,27 @@ fun AccordionHeader(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = if (isCompactHeight) 14.dp else 16.dp,
+                vertical = if (isCompactHeight) 9.dp else 12.dp
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(

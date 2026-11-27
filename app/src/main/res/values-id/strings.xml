@@ -698,5 +698,21 @@
     <string name="shizuku_dex_import_failed_toast">Gagal mengimpor DEX: %1$s</string>
     <string name="shizuku_dex_not_found_download_toast">rish_shizuku.dex tidak ditemukan di Download</string>
     <string name="shizuku_dex_removed_toast">rish_shizuku.dex dihapus</string>
+    <string name="nav_drawer_toggle">Percakapan &amp; Project</string>
+    <string name="nav_side_panel_toggle">Buka atau tutup panel workspace</string>
+    <string name="editor_select_file_prompt">Pilih berkas dari penjelajah untuk dibuka di editor</string>
+    <string name="editor_empty_title">Belum ada berkas terbuka di editor</string>
+    <string name="editor_empty_subtitle">Buka tab Berkas untuk memilih berkas dari workspace Anda.</string>
+    <string name="agent_review_header_count">Tinjauan (%1$d/%2$d)</string>
+    <string name="agent_review_filter_all">Semua</string>
+    <string name="agent_review_filter_kotlin">Kotlin</string>
+    <string name="agent_review_filter_config">Konfigurasi</string>
+    <string name="agent_review_filter_markdown">Markdown</string>
+    <string name="agent_review_diff_refreshed">Perubahan workspace diperbarui</string>
+    <string name="agent_review_expand_all">Bentangkan Semua</string>
+    <string name="agent_review_collapse_all">Ciutkan Semua</string>
+    <string name="agent_review_empty_search">Tidak ada berkas berubah yang cocok dengan pencarian.</string>
+    <string name="agent_review_empty">Belum ada berkas yang diubah di workspace untuk ditinjau.</string>
+    <string name="topbar_core_update_short">Update</string>
 </resources>
 

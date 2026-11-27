@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
@@ -87,7 +89,8 @@ private val BULLET_REGEX = Regex("""^[-*+]\s+(.*)$""")
 private val NUM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
 private val BULLET_PREFIX_REGEX = Regex("""^[-*+]\s+""")
 private val NUM_PREFIX_REGEX = Regex("""^\d+\.\s+""")
-private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))""")
+private val INLINE_LINK_WIDTH_REGEX = Regex("""\[([^\]]+)\]\([^)]+\)""")
+private val ESCAPE_PUNCT_WIDTH_REGEX = Regex("""\\([\\`*_{}\[\]()#+\-.!~|])""")
 
 private val markdownBlockCache = LruCache<String, List<MarkdownElement>>(64)
 private val inlineMarkdownCache = LruCache<String, AnnotatedString>(256)
@@ -373,80 +376,501 @@ private fun parseMarkdownUncached(content: String): List<MarkdownElement> {
     return elements
 }
 
-fun parseInlineMarkdown(
+private fun isInlineEscapeChar(ch: Char): Boolean {
+    return ch == '\\' || ch == '`' || ch == '*' || ch == '_' || ch == '~' ||
+        ch == '[' || ch == ']' || ch == '(' || ch == ')' || ch == '#' ||
+        ch == '|' || ch == '{' || ch == '}' || ch == '+' || ch == '-' ||
+        ch == '.' || ch == '!'
+}
+
+private fun countRun(text: String, idx: Int, end: Int, ch: Char): Int {
+    var k = idx
+    while (k < end && text[k] == ch) k++
+    return k - idx
+}
+
+private fun findMatchingCodeSpanEnd(text: String, openEnd: Int, end: Int, tickCount: Int): Int {
+    var j = openEnd
+    while (j < end) {
+        if (text[j] == '`') {
+            val run = countRun(text, j, end, '`')
+            if (run == tickCount) return j
+            j += run
+        } else {
+            j++
+        }
+    }
+    return -1
+}
+
+private fun skipCodeSpanOrAdvance(text: String, idx: Int, end: Int): Int {
+    val ticks = countRun(text, idx, end, '`')
+    val closeIdx = findMatchingCodeSpanEnd(text, idx + ticks, end, ticks)
+    return if (closeIdx != -1) closeIdx + ticks else idx + ticks
+}
+
+private fun findLinkBounds(text: String, openBracketIdx: Int, end: Int): Triple<Int, Int, Int>? {
+    var j = openBracketIdx + 1
+    var bracketDepth = 1
+    while (j < end) {
+        val c = text[j]
+        if (c == '\\' && j + 1 < end && isInlineEscapeChar(text[j + 1])) {
+            j += 2
+            continue
+        }
+        if (c == '`') {
+            j = skipCodeSpanOrAdvance(text, j, end)
+            continue
+        }
+        if (c == '[') {
+            bracketDepth++
+        } else if (c == ']') {
+            bracketDepth--
+            if (bracketDepth == 0) break
+        }
+        j++
+    }
+    if (bracketDepth != 0 || j + 1 >= end || text[j + 1] != '(') return null
+
+    val closeBracketIdx = j
+    val openParenIdx = j + 1
+    var k = openParenIdx + 1
+    var parenDepth = 1
+    while (k < end) {
+        val c = text[k]
+        if (c == '\\' && k + 1 < end && isInlineEscapeChar(text[k + 1])) {
+            k += 2
+            continue
+        }
+        if (c == '\n' || c == '\r') return null
+        if (c == '(') {
+            parenDepth++
+        } else if (c == ')') {
+            parenDepth--
+            if (parenDepth == 0) {
+                return Triple(closeBracketIdx, openParenIdx, k)
+            }
+        }
+        k++
+    }
+    return null
+}
+
+private fun findClosingStrike(text: String, contentStart: Int, end: Int): Int {
+    var j = contentStart
+    while (j + 1 < end) {
+        val c = text[j]
+        if (c == '\\' && j + 1 < end && isInlineEscapeChar(text[j + 1])) {
+            j += 2
+            continue
+        }
+        if (c == '`') {
+            j = skipCodeSpanOrAdvance(text, j, end)
+            continue
+        }
+        if (c == '~' && text[j + 1] == '~') {
+            val run = countRun(text, j, end, '~')
+            if (run == 2 && j > contentStart && !text[j - 1].isWhitespace()) {
+                return j
+            }
+            j += run
+            continue
+        }
+        j++
+    }
+    return -1
+}
+
+private fun findClosingTripleAsterisk(text: String, contentStart: Int, end: Int): Int {
+    var j = contentStart
+    while (j + 2 < end) {
+        val c = text[j]
+        if (c == '\\' && j + 1 < end && isInlineEscapeChar(text[j + 1])) {
+            j += 2
+            continue
+        }
+        if (c == '`') {
+            j = skipCodeSpanOrAdvance(text, j, end)
+            continue
+        }
+        if (c == '*') {
+            val run = countRun(text, j, end, '*')
+            if (run >= 3 && j > contentStart && !text[j - 1].isWhitespace()) {
+                return j + run - 3
+            }
+            j += run
+            continue
+        }
+        j++
+    }
+    return -1
+}
+
+private fun findClosingDoubleDelim(
     text: String,
-    primaryColor: Color = Color(0xFF1D64E6),
-    codeBgColor: Color = Color(0x2B888888),
-    codeTextColor: Color = Color.Unspecified
-): AnnotatedString {
-    if (text.isEmpty()) return AnnotatedString("")
-    val cacheKey = "${primaryColor.value}:${codeBgColor.value}:${codeTextColor.value}:$text"
-    inlineMarkdownCache.get(cacheKey)?.let { return it }
-
-    val result = buildAnnotatedString {
-        var cursor = 0
-        val matches = INLINE_TOKEN_REGEX.findAll(text)
-
-        for (match in matches) {
-            if (match.range.first > cursor) {
-                append(text.substring(cursor, match.range.first))
+    contentStart: Int,
+    end: Int,
+    delimChar: Char
+): Int {
+    var j = contentStart
+    var doubleDepth = 0
+    var inSingle = false
+    while (j + 1 < end) {
+        val c = text[j]
+        if (c == '\\' && j + 1 < end && isInlineEscapeChar(text[j + 1])) {
+            j += 2
+            continue
+        }
+        if (c == '`') {
+            j = skipCodeSpanOrAdvance(text, j, end)
+            continue
+        }
+        if (c == delimChar) {
+            val run = countRun(text, j, end, delimChar)
+            if (run == 1) {
+                val boundaryOk = delimChar != '_' || j == contentStart || !text[j - 1].isLetterOrDigit()
+                val closeBoundaryOk = delimChar != '_' || j + 1 >= end || !text[j + 1].isLetterOrDigit()
+                if (!inSingle && j + 1 < end && !text[j + 1].isWhitespace() && boundaryOk) {
+                    inSingle = true
+                } else if (inSingle && j > contentStart && !text[j - 1].isWhitespace() && closeBoundaryOk) {
+                    inSingle = false
+                }
+                j++
+                continue
             }
 
-            val token = match.value
-            when {
-                token.startsWith("`") && token.endsWith("`") && token.length >= 2 -> {
-                    val code = token.substring(1, token.length - 1)
-                    val start = length
-                    append(" $code ")
-                    addStyle(
-                        SpanStyle(
-                            fontFamily = FontFamily.Monospace,
-                            background = codeBgColor,
-                            color = codeTextColor,
-                            fontSize = 11.5.sp
-                        ),
-                        start,
-                        length
+            val canClose = j > contentStart && !text[j - 1].isWhitespace() &&
+                (delimChar != '_' || j + run >= end || !text[j + run].isLetterOrDigit())
+            val canOpen = j + run < end && !text[j + run].isWhitespace() &&
+                (delimChar != '_' || j == contentStart || !text[j - 1].isLetterOrDigit())
+
+            if (canClose) {
+                if (doubleDepth == 0) {
+                    return if (inSingle && run >= 3) j + run - 2 else j
+                }
+                doubleDepth--
+            } else if (canOpen) {
+                doubleDepth++
+            }
+            j += run
+            continue
+        }
+        j++
+    }
+    return -1
+}
+
+private fun findClosingSingleDelim(
+    text: String,
+    contentStart: Int,
+    end: Int,
+    delimChar: Char
+): Int {
+    var j = contentStart
+    var doubleDepth = 0
+    while (j < end) {
+        val c = text[j]
+        if (c == '\\' && j + 1 < end && isInlineEscapeChar(text[j + 1])) {
+            j += 2
+            continue
+        }
+        if (c == '`') {
+            j = skipCodeSpanOrAdvance(text, j, end)
+            continue
+        }
+        if (c == delimChar) {
+            val run = countRun(text, j, end, delimChar)
+            if (run >= 2) {
+                val canCloseDouble = j > contentStart && !text[j - 1].isWhitespace()
+                val canOpenDouble = j + run < end && !text[j + run].isWhitespace() &&
+                    (delimChar != '_' || j == contentStart || !text[j - 1].isLetterOrDigit())
+                if (run == 2) {
+                    if (doubleDepth > 0 && canCloseDouble) {
+                        doubleDepth--
+                    } else if (!canCloseDouble && canOpenDouble) {
+                        doubleDepth++
+                    }
+                } else {
+                    if (doubleDepth > 0 && canCloseDouble) {
+                        doubleDepth--
+                        val closeBoundaryOk = delimChar != '_' || j + run >= end || !text[j + run].isLetterOrDigit()
+                        if (doubleDepth == 0 && closeBoundaryOk) {
+                            return j + run - 1
+                        }
+                    } else if (!canCloseDouble && canOpenDouble) {
+                        doubleDepth++
+                    }
+                }
+                j += run
+                continue
+            }
+
+            val closeBoundaryOk = delimChar != '_' || j + 1 >= end || !text[j + 1].isLetterOrDigit()
+            if (doubleDepth == 0 && j > contentStart && !text[j - 1].isWhitespace() && closeBoundaryOk) {
+                return j
+            }
+            j++
+            continue
+        }
+        j++
+    }
+    return -1
+}
+
+private fun containsUnclosedSingleAsterisk(text: String, start: Int, end: Int): Boolean {
+    if (start >= end || text[start] != '*' || (start + 1 < end && text[start + 1] == '*')) {
+        return false
+    }
+    return findClosingSingleDelim(text, start + 1, end, '*') == -1
+}
+
+private fun appendInlineMarkdown(
+    builder: AnnotatedString.Builder,
+    text: String,
+    start: Int,
+    end: Int,
+    primaryColor: Color,
+    codeBgColor: Color,
+    codeTextColor: Color,
+    codeFontSize: TextUnit
+) {
+    var i = start
+    while (i < end) {
+        val ch = text[i]
+
+        // 1. Backslash escape
+        if (ch == '\\' && i + 1 < end && isInlineEscapeChar(text[i + 1])) {
+            builder.append(text[i + 1])
+            i += 2
+            continue
+        }
+
+        // 2. Inline code span (highest precedence)
+        if (ch == '`') {
+            val tickCount = countRun(text, i, end, '`')
+            val closeIdx = findMatchingCodeSpanEnd(text, i + tickCount, end, tickCount)
+            if (closeIdx != -1) {
+                var code = text.substring(i + tickCount, closeIdx)
+                if (tickCount > 1 && code.length >= 2 && code.startsWith(' ') && code.endsWith(' ') && code.any { it != ' ' }) {
+                    code = code.substring(1, code.length - 1)
+                }
+                val spanStart = builder.length
+                builder.append(" $code ")
+                builder.addStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        background = codeBgColor,
+                        color = codeTextColor,
+                        fontSize = codeFontSize
+                    ),
+                    spanStart,
+                    builder.length
+                )
+                i = closeIdx + tickCount
+                continue
+            }
+            builder.append(text, i, i + tickCount)
+            i += tickCount
+            continue
+        }
+
+        // 3. Links [label](url)
+        if (ch == '[') {
+            val bounds = findLinkBounds(text, i, end)
+            if (bounds != null) {
+                val (closeBracket, openParen, closeParen) = bounds
+                val url = text.substring(openParen + 1, closeParen).trim()
+                if (url.isNotBlank()) {
+                    val spanStart = builder.length
+                    appendInlineMarkdown(
+                        builder = builder,
+                        text = text,
+                        start = i + 1,
+                        end = closeBracket,
+                        primaryColor = primaryColor,
+                        codeBgColor = codeBgColor,
+                        codeTextColor = codeTextColor,
+                        codeFontSize = codeFontSize
                     )
-                }
-                token.startsWith("**") && token.endsWith("**") && token.length >= 4 -> {
-                    val boldText = token.substring(2, token.length - 2)
-                    val start = length
-                    append(boldText)
-                    addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
-                }
-                token.startsWith("*") && token.endsWith("*") && token.length >= 2 -> {
-                    val italicText = token.substring(1, token.length - 1)
-                    val start = length
-                    append(italicText)
-                    addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
-                }
-                token.startsWith("[") && token.contains("](") && token.endsWith(")") -> {
-                    val label = token.substringAfter("[").substringBefore("](")
-                    val url = token.substringAfter("](").substringBeforeLast(")")
-                    val start = length
-                    append(label)
-                    addStyle(
+                    builder.addStyle(
                         SpanStyle(
                             color = primaryColor,
                             textDecoration = TextDecoration.Underline,
                             fontWeight = FontWeight.Medium
                         ),
-                        start,
-                        length
+                        spanStart,
+                        builder.length
                     )
-                    addStringAnnotation(tag = "URL", annotation = url, start = start, end = length)
-                }
-                else -> {
-                    append(token)
+                    builder.addStringAnnotation(
+                        tag = "URL",
+                        annotation = url,
+                        start = spanStart,
+                        end = builder.length
+                    )
+                    i = closeParen + 1
+                    continue
                 }
             }
-            cursor = match.range.last + 1
+            builder.append('[')
+            i++
+            continue
         }
 
-        if (cursor < text.length) {
-            append(text.substring(cursor))
+        // 4. Strikethrough ~~...~~
+        if (ch == '~' && i + 2 < end && text[i + 1] == '~' && !text[i + 2].isWhitespace()) {
+            val closeIdx = findClosingStrike(text, i + 2, end)
+            if (closeIdx != -1) {
+                val spanStart = builder.length
+                appendInlineMarkdown(
+                    builder = builder,
+                    text = text,
+                    start = i + 2,
+                    end = closeIdx,
+                    primaryColor = primaryColor,
+                    codeBgColor = codeBgColor,
+                    codeTextColor = codeTextColor,
+                    codeFontSize = codeFontSize
+                )
+                builder.addStyle(
+                    SpanStyle(textDecoration = TextDecoration.LineThrough),
+                    spanStart,
+                    builder.length
+                )
+                i = closeIdx + 2
+                continue
+            }
+            builder.append('~')
+            i++
+            continue
         }
+
+        // 5. Bold + Italic ***...***, Bold **...** / __...__, Italic *...* / _..._
+        if (ch == '*' || ch == '_') {
+            val run = countRun(text, i, end, ch)
+
+            // ***...***
+            if (ch == '*' && run >= 3 && i + 3 < end && !text[i + 3].isWhitespace()) {
+                val closeTriple = findClosingTripleAsterisk(text, i + 3, end)
+                if (closeTriple != -1) {
+                    val spanStart = builder.length
+                    appendInlineMarkdown(
+                        builder = builder,
+                        text = text,
+                        start = i + 3,
+                        end = closeTriple,
+                        primaryColor = primaryColor,
+                        codeBgColor = codeBgColor,
+                        codeTextColor = codeTextColor,
+                        codeFontSize = codeFontSize
+                    )
+                    builder.addStyle(
+                        SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic),
+                        spanStart,
+                        builder.length
+                    )
+                    i = closeTriple + 3
+                    continue
+                }
+            }
+
+            // **...** or __...__
+            if (run >= 2 && i + 2 < end && !text[i + 2].isWhitespace()) {
+                val boundaryOk = ch != '_' || i == start || !text[i - 1].isLetterOrDigit()
+                if (boundaryOk) {
+                    val closeDouble = findClosingDoubleDelim(text, i + 2, end, ch)
+                    val preferSingleOuter = ch == '*' && run == 3 &&
+                        closeDouble != -1 &&
+                        containsUnclosedSingleAsterisk(text, i + 2, closeDouble)
+                    if (closeDouble != -1 && !preferSingleOuter) {
+                        val spanStart = builder.length
+                        appendInlineMarkdown(
+                            builder = builder,
+                            text = text,
+                            start = i + 2,
+                            end = closeDouble,
+                            primaryColor = primaryColor,
+                            codeBgColor = codeBgColor,
+                            codeTextColor = codeTextColor,
+                            codeFontSize = codeFontSize
+                        )
+                        builder.addStyle(
+                            SpanStyle(fontWeight = FontWeight.Bold),
+                            spanStart,
+                            builder.length
+                        )
+                        i = closeDouble + 2
+                        continue
+                    }
+                }
+            }
+
+            // *...* or _..._ (also handles leading * of ***bold** and italic*)
+            if ((run == 1 || (ch == '*' && run >= 3)) && i + 1 < end && !text[i + 1].isWhitespace()) {
+                val boundaryOk = ch != '_' || i == start || !text[i - 1].isLetterOrDigit()
+                if (boundaryOk) {
+                    val closeSingle = findClosingSingleDelim(text, i + 1, end, ch)
+                    if (closeSingle != -1) {
+                        val spanStart = builder.length
+                        appendInlineMarkdown(
+                            builder = builder,
+                            text = text,
+                            start = i + 1,
+                            end = closeSingle,
+                            primaryColor = primaryColor,
+                            codeBgColor = codeBgColor,
+                            codeTextColor = codeTextColor,
+                            codeFontSize = codeFontSize
+                        )
+                        builder.addStyle(
+                            SpanStyle(fontStyle = FontStyle.Italic),
+                            spanStart,
+                            builder.length
+                        )
+                        i = closeSingle + 1
+                        continue
+                    }
+                }
+            }
+
+            builder.append(ch)
+            i++
+            continue
+        }
+
+        // Fast-forward plain characters up to next potential inline marker
+        val plainStart = i
+        i++
+        while (i < end) {
+            val c = text[i]
+            if (c == '\\' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[') break
+            i++
+        }
+        builder.append(text, plainStart, i)
+    }
+}
+
+fun parseInlineMarkdown(
+    text: String,
+    primaryColor: Color = Color(0xFF1D64E6),
+    codeBgColor: Color = Color(0x2B888888),
+    codeTextColor: Color = Color.Unspecified,
+    codeFontSize: TextUnit = 11.5.sp
+): AnnotatedString {
+    if (text.isEmpty()) return AnnotatedString("")
+    val cacheKey = "${primaryColor.value}:${codeBgColor.value}:${codeTextColor.value}:${codeFontSize.value}:$text"
+    inlineMarkdownCache.get(cacheKey)?.let { return it }
+
+    val result = buildAnnotatedString {
+        appendInlineMarkdown(
+            builder = this,
+            text = text,
+            start = 0,
+            end = text.length,
+            primaryColor = primaryColor,
+            codeBgColor = codeBgColor,
+            codeTextColor = codeTextColor,
+            codeFontSize = codeFontSize
+        )
     }
     inlineMarkdownCache.put(cacheKey, result)
     return result
@@ -673,7 +1097,29 @@ fun MarkdownText(
 }
 
 private fun stripSimpleMarkdownForWidth(text: String): Int {
-    return text.replace("**", "").replace("`", "").length
+    val unlinked = INLINE_LINK_WIDTH_REGEX.replace(text) { it.groupValues[1] }
+    val unescaped = ESCAPE_PUNCT_WIDTH_REGEX.replace(unlinked) { it.groupValues[1] }
+    return unescaped
+        .replace("**", "")
+        .replace("~~", "")
+        .replace("`", "")
+        .trim()
+        .length
+}
+
+internal fun computeTableColumnWidthsDp(
+    headers: List<String>,
+    rows: List<List<String>>
+): List<Float> {
+    val colCount = headers.size.coerceAtLeast(1)
+    return (0 until colCount).map { colIdx ->
+        var maxChars = stripSimpleMarkdownForWidth(headers.getOrElse(colIdx) { "" })
+        for (row in rows) {
+            val cellLen = stripSimpleMarkdownForWidth(row.getOrElse(colIdx) { "" })
+            if (cellLen > maxChars) maxChars = cellLen
+        }
+        ((maxChars * 6.0f) + 18f).coerceIn(48f, 168f)
+    }
 }
 
 private fun alignmentToTextAlign(align: Char): TextAlign = when (align) {
@@ -693,86 +1139,98 @@ fun MarkdownTableCard(
     val codeBgColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
     val codeTextColor = MaterialTheme.colorScheme.onSurface
     val colCount = table.headers.size.coerceAtLeast(1)
-    val colWidths: List<Dp> = remember(table) {
-        (0 until colCount).map { colIdx ->
-            var maxChars = stripSimpleMarkdownForWidth(table.headers.getOrElse(colIdx) { "" })
-            for (row in table.rows) {
-                val cellLen = stripSimpleMarkdownForWidth(row.getOrElse(colIdx) { "" })
-                if (cellLen > maxChars) maxChars = cellLen
-            }
-            ((maxChars * 7.4f) + 24f).coerceIn(72f, 260f).dp
-        }
-    }
+    val tableFontSize = (fontSize.value - 1f).coerceAtLeast(10.5f).sp
+    val tableLineHeight = (tableFontSize.value * 1.32f).sp
+    val tableCodeFontSize = (tableFontSize.value - 0.5f).coerceAtLeast(10f).sp
 
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .padding(vertical = 2.dp)
     ) {
-        Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-            Row(
-                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
-            ) {
-                for (c in 0 until colCount) {
-                    val headerText = table.headers.getOrElse(c) { "" }
-                    val annotated = remember(headerText, primaryColor, codeBgColor, codeTextColor) {
-                        parseInlineMarkdown(headerText, primaryColor, codeBgColor, codeTextColor)
-                    }
-                    val align = alignmentToTextAlign(table.alignments.getOrElse(c) { 'L' })
-                    Box(
-                        modifier = Modifier
-                            .width(colWidths[c])
-                            .padding(horizontal = 10.dp, vertical = 7.dp)
-                    ) {
-                        FormattedText(
-                            annotatedString = annotated,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = fontSize,
-                                lineHeight = lineHeight,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor,
-                                textAlign = align,
-                                fontFeatureSettings = "tnum"
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
+        val rawWidths = remember(table) { computeTableColumnWidthsDp(table.headers, table.rows) }
+        val maxWidthDp = maxWidth.value
+        val colWidths: List<Dp> = remember(rawWidths, maxWidthDp) {
+            val total = rawWidths.sum()
+            if (total > 0f && total in (maxWidthDp * 0.72f)..maxWidthDp) {
+                val scale = maxWidthDp / total
+                rawWidths.map { (it * scale).dp }
+            } else {
+                rawWidths.map { it.dp }
             }
+        }
 
-            table.rows.forEachIndexed { rIdx, row ->
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                val rowBg = if (rIdx % 2 == 1) {
-                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.45f)
-                } else {
-                    Color.Transparent
-                }
-                Row(modifier = Modifier.background(rowBg)) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            modifier = Modifier.widthIn(max = maxWidth)
+        ) {
+            Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                Row(
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
+                ) {
                     for (c in 0 until colCount) {
-                        val cellText = row.getOrElse(c) { "" }
-                        val annotated = remember(cellText, primaryColor, codeBgColor, codeTextColor) {
-                            parseInlineMarkdown(cellText, primaryColor, codeBgColor, codeTextColor)
+                        val headerText = table.headers.getOrElse(c) { "" }
+                        val annotated = remember(headerText, primaryColor, codeBgColor, codeTextColor, tableCodeFontSize) {
+                            parseInlineMarkdown(headerText, primaryColor, codeBgColor, codeTextColor, tableCodeFontSize)
                         }
                         val align = alignmentToTextAlign(table.alignments.getOrElse(c) { 'L' })
                         Box(
                             modifier = Modifier
                                 .width(colWidths[c])
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             FormattedText(
                                 annotatedString = annotated,
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = fontSize,
-                                    lineHeight = lineHeight,
+                                    fontSize = tableFontSize,
+                                    lineHeight = tableLineHeight,
+                                    fontWeight = FontWeight.Bold,
                                     color = textColor,
                                     textAlign = align,
                                     fontFeatureSettings = "tnum"
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        }
+                    }
+                }
+
+                table.rows.forEachIndexed { rIdx, row ->
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    )
+                    val rowBg = if (rIdx % 2 == 1) {
+                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.45f)
+                    } else {
+                        Color.Transparent
+                    }
+                    Row(modifier = Modifier.background(rowBg)) {
+                        for (c in 0 until colCount) {
+                            val cellText = row.getOrElse(c) { "" }
+                            val annotated = remember(cellText, primaryColor, codeBgColor, codeTextColor, tableCodeFontSize) {
+                                parseInlineMarkdown(cellText, primaryColor, codeBgColor, codeTextColor, tableCodeFontSize)
+                            }
+                            val align = alignmentToTextAlign(table.alignments.getOrElse(c) { 'L' })
+                            Box(
+                                modifier = Modifier
+                                    .width(colWidths[c])
+                                    .padding(horizontal = 8.dp, vertical = 4.5.dp)
+                            ) {
+                                FormattedText(
+                                    annotatedString = annotated,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = tableFontSize,
+                                        lineHeight = tableLineHeight,
+                                        color = textColor,
+                                        textAlign = align,
+                                        fontFeatureSettings = "tnum"
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }
