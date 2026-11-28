@@ -126,4 +126,12 @@ class AcpSessionPoolTest {
         assertFalse(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = false, hasWarmSession = false))
         assertFalse(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = true, hasWarmSession = false))
     }
+
+    @Test
+    fun parsePidFromProcessString_extractsUnixProcessPidSafely() {
+        assertEquals(24680, AcpSessionPool.parsePidFromProcessString("Process[pid=24680, hasExited=false]"))
+        assertEquals(9971, AcpSessionPool.parsePidFromProcessString("UNIXProcess[pid=9971]"))
+        assertEquals(-1, AcpSessionPool.parsePidFromProcessString("Process[no_pid]"))
+        assertEquals(-1, AcpSessionPool.parsePidFromProcessString(null))
+    }
 }

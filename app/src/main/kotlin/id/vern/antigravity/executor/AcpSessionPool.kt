@@ -1,7 +1,6 @@
 package id.vern.antigravity.executor
 
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import id.vern.antigravity.gateway.ShizukuConfig
 import id.vern.antigravity.gateway.SystemGatewayServer
@@ -175,19 +174,27 @@ object AcpSessionPool {
     internal fun shouldScheduleIdleReap(keepWarmMode: Boolean, hasWarmSession: Boolean): Boolean =
         !keepWarmMode && hasWarmSession
 
+    internal fun parsePidFromProcessString(desc: String?): Int {
+        if (desc.isNullOrBlank()) return -1
+        val match = Regex("""\bpid=(\d+)""").find(desc) ?: return -1
+        return match.groupValues.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 } ?: -1
+    }
+
     internal fun extractProcessPid(process: Process): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            try {
-                return process.pid().toInt()
-            } catch (_: Throwable) {}
-        }
-        return try {
+        // 1. Android UNIXProcess.toString() includes "pid=<N>" without touching hidden reflection APIs
+        val fromStr = parsePidFromProcessString(runCatching { process.toString() }.getOrNull())
+        if (fromStr > 0) return fromStr
+        // 2. Reflection fallback for JVM/ART Process.pid() method
+        val fromMethod = runCatching {
+            (process.javaClass.getMethod("pid").invoke(process) as? Number)?.toInt()
+        }.getOrNull()
+        if (fromMethod != null && fromMethod > 0) return fromMethod
+        // 3. Reflection fallback for UNIXProcess.pid field
+        return runCatching {
             val field = process.javaClass.getDeclaredField("pid")
             field.isAccessible = true
             field.getInt(process)
-        } catch (_: Throwable) {
-            -1
-        }
+        }.getOrDefault(-1)
     }
 
     fun onNetworkChanged() {
