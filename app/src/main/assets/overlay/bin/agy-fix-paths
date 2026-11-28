@@ -47,7 +47,7 @@ done < <(grep -rIlZ -E -e "$PATTERN" -- "${targets[@]}" 2>/dev/null)
 while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
     tmp="$f.agyfix.$$"
-    if sed -E "1s@^#! */usr/bin/env[[:space:]]+([^[:space:]]+)@#!$esc/bin/\\1@" "$f" > "$tmp" 2>/dev/null; then
+    if sed -E "1{s@^#! */usr/bin/env([[:space:]]+-[A-Za-z].*)@#!$esc/bin/env\\1@; t; s@^#! */usr/bin/env[[:space:]]+([^-][^[:space:]]*)@#!$esc/bin/\\1@}" "$f" > "$tmp" 2>/dev/null; then
         if cmp -s "$f" "$tmp"; then
             rm -f "$tmp"
         else
@@ -61,4 +61,16 @@ while IFS= read -r -d '' f; do
     fi
 done < <(grep -rIlZ -E -m 1 -e '^#! */usr/bin/env' -- "${targets[@]}" 2>/dev/null)
 
-printf 'agy-fix-paths: rewrote %d file(s) -> %s\n' "$count" "$PREFIX"
+# 3. Rewrite symlinks pointing to legacy Termux/app prefixes
+while IFS= read -r -d '' link; do
+    [ -n "$link" ] || continue
+    target="$(readlink "$link" 2>/dev/null)" || continue
+    new_target="$(printf '%s' "$target" | sed -E "s@$PATTERN@$esc@g")"
+    if [ "$new_target" != "$target" ]; then
+        if ln -sfn "$new_target" "$link" 2>/dev/null; then
+            count=$((count + 1))
+        fi
+    fi
+done < <(find "${targets[@]}" -type l -print0 2>/dev/null)
+
+printf 'agy-fix-paths: rewrote %d item(s) -> %s\n' "$count" "$PREFIX"

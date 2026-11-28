@@ -1,5 +1,6 @@
 package id.vern.antigravity.gateway
 
+import id.vern.antigravity.service.WakeLockHolder
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -249,5 +250,38 @@ class SystemGatewayServerTest {
         assertTrue(bg.getBoolean("fgs_active"))
         assertEquals(0, bg.getInt("cgroup_frozen"))
         assertTrue(bg.getBoolean("wakelock_active"))
+    }
+
+    @Test
+    fun buildShizukuDiagCommand_checksWakeLocksBySectionAndUidNotHardcoded15Lines() {
+        val cmd = SystemGatewayServer.buildShizukuDiagCommand("id.vern.antigravity.turbo")
+        assertTrue(cmd.contains("sed -n '/Wake Locks:/,/^\$/p'"))
+        assertTrue(cmd.contains("uid=\${UID_BG}"))
+        assertTrue(cmd.contains("id.vern.antigravity.turbo"))
+        assertFalse(cmd.contains("grep -A 15 'Wake Locks:'"))
+    }
+
+    @Test
+    fun wakeLockHolder_resolvesPackageSpecificTagsForTurboFlavor() {
+        assertEquals(
+            "id.vern.antigravity.turbo:wakelock",
+            WakeLockHolder.resolveLockTag("id.vern.antigravity.turbo", WakeLockHolder.LOCK_TAG)
+        )
+        assertEquals(
+            "id.vern.antigravity.turbo:exec_wakelock",
+            WakeLockHolder.resolveLockTag("id.vern.antigravity.turbo", "id.vern.antigravity:exec_wakelock")
+        )
+        assertEquals(
+            "id.vern.antigravity:wakelock",
+            WakeLockHolder.resolveLockTag("id.vern.antigravity", WakeLockHolder.LOCK_TAG)
+        )
+        assertEquals(
+            "custom:tag",
+            WakeLockHolder.resolveLockTag("id.vern.antigravity.turbo", "custom:tag")
+        )
+        assertEquals(
+            "id.vern.antigravity.turbo:wifilock",
+            WakeLockHolder.resolveWifiLockTag("id.vern.antigravity.turbo")
+        )
     }
 }

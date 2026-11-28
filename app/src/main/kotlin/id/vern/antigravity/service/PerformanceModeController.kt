@@ -6,6 +6,8 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import android.os.Process
+import android.system.Os
 import android.util.Log
 import id.vern.antigravity.executor.AcpSessionPool
 import id.vern.antigravity.gateway.ShizukuConfig
@@ -108,6 +110,12 @@ object PerformanceModeController {
     @Volatile
     private var lastShizukuReadback: ShizukuTuningReadback = ShizukuTuningReadback()
 
+    @Volatile
+    private var enabledCached: Boolean = false
+
+    @Volatile
+    private var appContextRef: Context? = null
+
     private val mutableStatus = MutableStateFlow(PerformanceStatusSnapshot())
     val status: StateFlow<PerformanceStatusSnapshot> = mutableStatus.asStateFlow()
 
@@ -118,10 +126,14 @@ object PerformanceModeController {
     }
 
     fun isEnabled(context: Context): Boolean {
+        val appCtx = context.applicationContext
+        appContextRef = appCtx
         return try {
-            context.applicationContext
+            val enabled = appCtx
                 .getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(KEY_PERFORMANCE_MODE, false)
+            enabledCached = enabled
+            enabled
         } catch (_: Exception) {
             false
         }
@@ -142,6 +154,8 @@ object PerformanceModeController {
 
     fun setEnabled(context: Context, enabled: Boolean): PerformanceStatusSnapshot {
         val appCtx = context.applicationContext
+        appContextRef = appCtx
+        enabledCached = enabled
         appCtx.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PERFORMANCE_MODE, enabled)
@@ -365,12 +379,21 @@ object PerformanceModeController {
         return parsed
     }
 
+    fun onShizukuBinderReady(context: Context) {
+        val appCtx = context.applicationContext
+        if (!isEnabled(appCtx)) return
+        if (lastShizukuReadback.appliedAtMs == 0L) {
+            applyShizukuTuningAndReadback(appCtx)
+            refreshStatus(appCtx, includeShizukuReadback = false)
+        }
+    }
+
     private fun onWarmAcpProcessSpawned(pid: Int) {
         if (pid <= 0) return
         val topo = getCpuTopology()
         if (!topo.hasBigCluster) return
-        // Only pin if Performance Mode is currently effective
-        if (mutableStatus.value.effectiveActive && !isCoolingDown) {
+        val isEnabledNow = enabledCached || (appContextRef?.let { isEnabled(it) } == true)
+        if (isEnabledNow && !isCoolingDown) {
             val count = RustTurboBridge.setProcessAffinity(pid, topo.bigCoresMask)
             lastAcpPinnedThreads = count.coerceAtLeast(0)
             lastAffinityDeferredByCpuset = (count == 0)
@@ -415,12 +438,35 @@ object PerformanceModeController {
         lastAffinityDeferredByCpuset = false
         if (allMask <= 0L) return
 
+        val handledPids = HashSet<Int>()
         AcpSessionPool.getWarmDaemonPid()?.let { pid ->
-            if (pid > 0) RustTurboBridge.setProcessAffinity(pid, allMask)
+            if (pid > 0) {
+                RustTurboBridge.setProcessAffinity(pid, allMask)
+                handledPids.add(pid)
+            }
         }
         readDaemonPid(context.applicationContext.filesDir)?.let { pid ->
-            if (pid > 0) RustTurboBridge.setProcessAffinity(pid, allMask)
+            if (pid > 0) {
+                RustTurboBridge.setProcessAffinity(pid, allMask)
+                handledPids.add(pid)
+            }
         }
+        // Unpin any child processes (bash, MCP servers, subagents) of our UID that inherited big-core pinning
+        try {
+            val myPid = Process.myPid()
+            val myUid = Process.myUid()
+            val procEntries = File("/proc").listFiles() ?: emptyArray()
+            for (entry in procEntries) {
+                val pid = entry.name.toIntOrNull() ?: continue
+                if (pid <= 0 || pid == myPid || handledPids.contains(pid)) continue
+                val uid = runCatching { Os.stat(entry.absolutePath).st_uid }.getOrDefault(-1)
+                if (uid != myUid) continue
+                val curMask = RustTurboBridge.getProcessAffinity(pid)
+                if (curMask > 0L && curMask != allMask) {
+                    RustTurboBridge.setProcessAffinity(pid, allMask)
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     private fun evaluateAndUpdateThermal(context: Context): ThermalGuardSnapshot {
@@ -474,7 +520,11 @@ object PerformanceModeController {
             val pidFile = File(filesDir, "home/.gemini/antigravity-app/daemon/daemon.pid")
             if (!pidFile.isFile) return null
             val pid = pidFile.readText(Charsets.UTF_8).trim().toIntOrNull() ?: return null
-            if (pid > 0 && File("/proc/$pid/cmdline").exists()) pid else null
+            if (pid <= 0) return null
+            val cmdlineFile = File("/proc/$pid/cmdline")
+            if (!cmdlineFile.isFile) return null
+            val cmdline = cmdlineFile.readText(Charsets.UTF_8).replace('\u0000', ' ')
+            if (CoreServerService.isDaemonCmdline(cmdline)) pid else null
         } catch (_: Exception) {
             null
         }

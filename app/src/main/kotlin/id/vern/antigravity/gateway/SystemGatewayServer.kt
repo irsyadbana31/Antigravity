@@ -335,6 +335,29 @@ class SystemGatewayServer(
             }
             return result
         }
+
+        internal fun buildShizukuDiagCommand(pkg: String): String = listOf(
+            "echo '===PKG==='",
+            "dumpsys package '$pkg' | grep -E 'versionCode|versionName|lastUpdateTime' | head -n 5",
+            "echo '===PID==='",
+            "pidof '$pkg' || true",
+            "echo '===BATT==='",
+            "dumpsys battery | grep -E 'level:|voltage:|temperature:|status:'",
+            "echo '===PROCS==='",
+            "ps -A | wc -l",
+            "echo '===MEM==='",
+            "dumpsys meminfo '$pkg' | grep -E 'TOTAL PSS:' | head -n 2",
+            "echo '===GFX==='",
+            "dumpsys gfxinfo '$pkg' | head -n 22",
+            "echo '===ANR==='",
+            "dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5",
+            "echo '===BG==='",
+            "dumpsys deviceidle whitelist | grep -q ',$pkg,' && echo 'doze_whitelist=true' || echo 'doze_whitelist=false'",
+            "echo \"standby_bucket=\$(am get-standby-bucket '$pkg' 2>/dev/null | tr -dc '0-9')\"",
+            "dumpsys activity services '$pkg' | grep -q 'isForeground=true' && echo 'fgs_active=true' || echo 'fgs_active=false'",
+            "UID_BG=\$(dumpsys package '$pkg' | grep -m1 'appId=' | sed 's/.*appId=//;s/ .*//' | tr -dc '0-9'); if [ -n \"\$UID_BG\" ] && [ -r \"/sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze\" ]; then echo \"cgroup_frozen=\$(cat /sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze 2>/dev/null)\"; fi",
+            "WL_SEC=\$(dumpsys power | sed -n '/Wake Locks:/,/^\$/p'); if printf '%s\n' \"\$WL_SEC\" | grep -Fq \"$pkg\" || { [ -n \"\$UID_BG\" ] && printf '%s\n' \"\$WL_SEC\" | grep -Eq \"uid=\${UID_BG}([^0-9]|\$)\"; }; then echo 'wakelock_active=true'; else echo 'wakelock_active=false'; fi"
+        ).joinToString("; ")
     }
 
     private data class CommandRecord(
@@ -798,13 +821,21 @@ class SystemGatewayServer(
         wakeLockHolder?.cleanupExpired()
 
         if (tag.isNotEmpty()) {
-            val held = when (action) {
-                "acquire" -> wakeLockHolder?.acquireTagged(context, tag, timeoutMs, withWifiLock = wantsWifi) == true
-                "release" -> wakeLockHolder?.releaseTagged(tag) == true
-                else -> wakeLockHolder?.isTaggedHeld(tag) == true
+            when (action) {
+                "acquire" -> {
+                    val held = wakeLockHolder?.acquireTagged(context, tag, timeoutMs, withWifiLock = wantsWifi) == true
+                    result.put("held", held)
+                }
+                "release" -> {
+                    val released = wakeLockHolder?.releaseTagged(tag) == true
+                    result.put("released", released)
+                    result.put("held", wakeLockHolder?.isTaggedHeld(tag) == true)
+                }
+                else -> {
+                    result.put("held", wakeLockHolder?.isTaggedHeld(tag) == true)
+                }
             }
-            result.put("held", held)
-                .put("tag", tag)
+            result.put("tag", tag)
                 .put("wifi_held", wakeLockHolder?.isWifiLockHeld == true)
         } else {
             when (action) {
@@ -1128,28 +1159,7 @@ class SystemGatewayServer(
                 .put("ok", false)
                 .put("error", "Invalid package name: $rawPkg")
         }
-        val diagCmd = listOf(
-            "echo '===PKG==='",
-            "dumpsys package '$pkg' | grep -E 'versionCode|versionName|lastUpdateTime' | head -n 5",
-            "echo '===PID==='",
-            "pidof '$pkg' || true",
-            "echo '===BATT==='",
-            "dumpsys battery | grep -E 'level:|voltage:|temperature:|status:'",
-            "echo '===PROCS==='",
-            "ps -A | wc -l",
-            "echo '===MEM==='",
-            "dumpsys meminfo '$pkg' | grep -E 'TOTAL PSS:' | head -n 2",
-            "echo '===GFX==='",
-            "dumpsys gfxinfo '$pkg' | head -n 22",
-            "echo '===ANR==='",
-            "dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5",
-            "echo '===BG==='",
-            "dumpsys deviceidle whitelist | grep -q ',$pkg,' && echo 'doze_whitelist=true' || echo 'doze_whitelist=false'",
-            "echo \"standby_bucket=\$(am get-standby-bucket '$pkg' 2>/dev/null | tr -dc '0-9')\"",
-            "dumpsys activity services '$pkg' | grep -q 'isForeground=true' && echo 'fgs_active=true' || echo 'fgs_active=false'",
-            "UID_BG=\$(dumpsys package '$pkg' | grep -m1 'appId=' | sed 's/.*appId=//;s/ .*//' | tr -dc '0-9'); if [ -n \"\$UID_BG\" ] && [ -r \"/sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze\" ]; then echo \"cgroup_frozen=\$(cat /sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze 2>/dev/null)\"; fi",
-            "dumpsys power | grep -A 15 'Wake Locks:' | grep -q \"$pkg\" && echo 'wakelock_active=true' || echo 'wakelock_active=false'"
-        ).joinToString("; ")
+        val diagCmd = buildShizukuDiagCommand(pkg)
         val execRes = ShizukuManager.executePrivileged(
             context = context,
             cmd = diagCmd,

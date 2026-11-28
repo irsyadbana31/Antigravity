@@ -134,18 +134,46 @@ class CoreServerService : Service() {
             }
         }
 
+        internal fun shouldUseStartForegroundService(
+            sdkInt: Int,
+            serviceRunning: Boolean,
+            action: String?
+        ): Boolean {
+            if (sdkInt < Build.VERSION_CODES.O || action == ACTION_STOP) return false
+            if (serviceRunning && (
+                    action == ACTION_ENSURE_ALIVE ||
+                        action == ACTION_SET_KEEP_ALIVE ||
+                        action == ACTION_SET_PERFORMANCE_MODE ||
+                        action == ACTION_AGENT_TURN_STATE
+                    )
+            ) {
+                return false
+            }
+            return true
+        }
+
+        internal fun isDaemonCmdline(cmdline: String): Boolean =
+            cmdline.contains("agy-daemon")
+
         private fun dispatchServiceIntent(context: Context, intent: Intent) {
+            val useFgs = shouldUseStartForegroundService(Build.VERSION.SDK_INT, isServiceRunning, intent.action)
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (useFgs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
                     context.startService(intent)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Service dispatch failed (${intent.action}): ${e.message}")
-                try {
-                    context.startService(intent)
-                } catch (_: Exception) {}
+                Log.w(TAG, "Service dispatch failed (${intent.action}, useFgs=$useFgs): ${e.message}")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && intent.action != ACTION_STOP) {
+                    try {
+                        context.startForegroundService(intent)
+                    } catch (_: Exception) {}
+                } else {
+                    try {
+                        context.startService(intent)
+                    } catch (_: Exception) {}
+                }
             }
         }
 
@@ -212,6 +240,8 @@ class CoreServerService : Service() {
     private var keepAlivePref: Boolean = false
     @Volatile
     private var performanceActive: Boolean = false
+    @Volatile
+    private var isInForeground: Boolean = false
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile
@@ -230,7 +260,7 @@ class CoreServerService : Service() {
         performanceActive = PerformanceModeController.isEffectivelyActive(this)
         isPerformanceModeActive = performanceActive
 
-        ForegroundNotification.start(this, getString(R.string.notification_engine_active))
+        isInForeground = ForegroundNotification.start(this, getString(R.string.notification_engine_active))
         wakeLockHolder.acquire(this, 30_000L, withWifiLock = keepAlivePref || performanceActive)
         syncLockSnapshot()
 
@@ -243,6 +273,13 @@ class CoreServerService : Service() {
         registerNetworkObserver()
         startBackgroundDaemon()
         reconcileKeepAliveState()
+        ShizukuManager.onBinderReadyCallback = {
+            if (PerformanceModeController.isEnabled(this@CoreServerService)) {
+                serviceScope.launch {
+                    PerformanceModeController.onShizukuBinderReady(this@CoreServerService)
+                }
+            }
+        }
         if (PerformanceModeController.isEnabled(this)) {
             startThermalMonitorLoop()
             serviceScope.launch {
@@ -254,7 +291,15 @@ class CoreServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isServiceRunning = true
-        when (intent?.action) {
+        val action = intent?.action
+        if (action != ACTION_STOP && !isInForeground) {
+            isInForeground = ForegroundNotification.start(
+                this,
+                if (isAgentTurnActive) currentActiveNotificationText() else idleNotificationText(),
+                isActiveTurn = isAgentTurnActive
+            )
+        }
+        when (action) {
             ACTION_STOP -> {
                 Log.i(TAG, "Stop action requested")
                 isAgentTurnActive = false
@@ -332,7 +377,7 @@ class CoreServerService : Service() {
         AppLogger.e("Engine", "Android FGS timeout received (type=$fgsType); re-promoting service safely")
         try {
             if (shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
-                ForegroundNotification.start(
+                isInForeground = ForegroundNotification.start(
                     this,
                     if (isAgentTurnActive) currentActiveNotificationText() else getString(R.string.notification_engine_running),
                     isActiveTurn = isAgentTurnActive
@@ -350,8 +395,10 @@ class CoreServerService : Service() {
     override fun onDestroy() {
         Log.i(TAG, "Destroying CoreServerService...")
         isServiceRunning = false
+        isInForeground = false
         isAgentTurnActive = false
         isPerformanceModeActive = false
+        ShizukuManager.onBinderReadyCallback = null
         keepAliveJob?.cancel()
         postTurnGraceJob?.cancel()
         thermalMonitorJob?.cancel()
@@ -386,7 +433,12 @@ class CoreServerService : Service() {
                 ?: getString(R.string.notification_agent_working)
             // Ensure foreground promotion + immediate CPU & Wi-Fi lock
             try {
-                ForegroundNotification.start(this, currentActiveNotificationText(), isActiveTurn = true)
+                val started = ForegroundNotification.start(this, currentActiveNotificationText(), isActiveTurn = true)
+                if (started) {
+                    isInForeground = true
+                } else {
+                    ForegroundNotification.update(this, currentActiveNotificationText(), isActiveTurn = true)
+                }
             } catch (_: Exception) {
                 ForegroundNotification.update(this, currentActiveNotificationText(), isActiveTurn = true)
             }
@@ -516,7 +568,10 @@ class CoreServerService : Service() {
             if (!pidFile.isFile) return false
             val pid = pidFile.readText(Charsets.UTF_8).trim().toIntOrNull() ?: return false
             if (pid <= 0) return false
-            File("/proc/$pid/cmdline").exists()
+            val cmdlineFile = File("/proc/$pid/cmdline")
+            if (!cmdlineFile.isFile) return false
+            val cmdline = cmdlineFile.readText(Charsets.UTF_8).replace('\u0000', ' ')
+            isDaemonCmdline(cmdline)
         } catch (_: Exception) {
             false
         }
@@ -566,6 +621,7 @@ class CoreServerService : Service() {
     }
 
     private fun dismissNotification() {
+        isInForeground = false
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)

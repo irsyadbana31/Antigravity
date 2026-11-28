@@ -64,9 +64,10 @@ object CoreUpdateDelegate {
         if (!force && lastChecked > 0 && now - lastChecked < 15 * 60 * 1000L) {
             return null
         }
-        val current = CoreUpdateManager.getCurrentVersion(context)
+        val current = currentState.currentVersion.takeIf { it.isNotBlank() && it != "unknown" }
+            ?: CoreUpdateManager.getCurrentVersion(context)
         return try {
-            val updateInfo = CoreUpdateManager.checkForUpdate(context)
+            val updateInfo = CoreUpdateManager.checkForUpdate(context, knownCurrentVersion = current)
             CoreEngineUpdateState(
                 isChecking = false,
                 currentVersion = current,

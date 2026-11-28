@@ -1,24 +1,20 @@
 # 00-env.sh -- core environment of the tlx prefix.
-export HOME="${HOME:-$(dirname "$PREFIX")}"
-export TMPDIR="$PREFIX/tmp"
-export PATH="$PREFIX/bin"
-export LD_LIBRARY_PATH="$PREFIX/lib"
-if [ -f "$PREFIX/lib/liblse_compat.so" ]; then
-    export LD_PRELOAD="$PREFIX/lib/liblse_compat.so:$PREFIX/lib/libtermux-exec.so"
-else
-    export LD_PRELOAD="$PREFIX/lib/libtermux-exec.so"
-fi
+_agy_files_dir="$(dirname "$PREFIX")"
+export HOME="${HOME:-$_agy_files_dir/home}"
+export TMPDIR="$_agy_files_dir/tmp"
+export PATH="$PREFIX/bin:$_agy_files_dir/engine/bin:$PREFIX/libexec/git-core:/system/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$PREFIX/lib:/system/lib64"
+unset LD_PRELOAD
 export TERMUX__PREFIX="$PREFIX"
 export TERMUX__ROOTFS="/"
-export TERMUX_APP__DATA_DIR="$(dirname "$PREFIX")"
+export TERMUX_APP__DATA_DIR="$_agy_files_dir"
 # Bridges set the package id for core-launched tools; derive it for direct shells.
 if [ -z "${AGY_APPLICATION_ID:-}" ]; then
-    _agy_pkg_dir="$(dirname "$(dirname "$PREFIX")")"
+    _agy_pkg_dir="$(dirname "$_agy_files_dir")"
     AGY_APPLICATION_ID="$(basename "$_agy_pkg_dir")"
     unset _agy_pkg_dir
 fi
 export AGY_APPLICATION_ID
-_agy_files_dir="$(dirname "$PREFIX")"
 if [ -z "${AGY_GATEWAY_PORT:-}" ] && [ -r "$_agy_files_dir/logs/gateway.port" ]; then
     AGY_GATEWAY_PORT="$(tr -d '[:space:]' < "$_agy_files_dir/logs/gateway.port" 2>/dev/null || true)"
 fi

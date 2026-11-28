@@ -20,7 +20,7 @@ object ForegroundNotification {
     const val NOTIFICATION_ID = 1001
     const val CHANNEL_ID = "agy_core_service_channel"
 
-    fun start(service: Service, statusText: String? = null, isActiveTurn: Boolean = false) {
+    fun start(service: Service, statusText: String? = null, isActiveTurn: Boolean = false): Boolean {
         val manager = service.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null) {
             val channel = NotificationChannel(
@@ -36,10 +36,10 @@ object ForegroundNotification {
 
         val text = statusText ?: service.getString(R.string.notification_engine_active)
         val notification = buildNotification(service, text, isActiveTurn)
-        promoteForeground(service, notification)
+        return promoteForeground(service, notification)
     }
 
-    private fun promoteForeground(service: Service, notification: Notification) {
+    private fun promoteForeground(service: Service, notification: Notification): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14/15/16: specialUse avoids the 6-hour dataSync FGS hard timeout.
             try {
@@ -48,7 +48,7 @@ object ForegroundNotification {
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
-                return
+                return true
             } catch (e: Exception) {
                 Log.w(TAG, "specialUse FGS start failed (${e.message}); falling back to dataSync")
             }
@@ -60,12 +60,18 @@ object ForegroundNotification {
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 )
-                return
+                return true
             } catch (e: Exception) {
                 Log.w(TAG, "dataSync FGS start failed (${e.message}); falling back to untyped startForeground")
             }
         }
-        service.startForeground(NOTIFICATION_ID, notification)
+        return try {
+            service.startForeground(NOTIFICATION_ID, notification)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Untyped FGS start failed (${e.message})")
+            false
+        }
     }
 
     fun update(context: Context, statusText: String? = null, isActiveTurn: Boolean = false) {

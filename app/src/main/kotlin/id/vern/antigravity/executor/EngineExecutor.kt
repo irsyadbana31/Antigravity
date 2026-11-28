@@ -16,6 +16,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -233,6 +234,8 @@ object EngineExecutor {
         context: Context,
         args: List<String>,
         workingDir: File? = null,
+        timeoutMs: Long? = null,
+        trackAsActive: Boolean = true,
         onOutputLine: (String, Boolean) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         val filesDir = context.filesDir
@@ -363,7 +366,7 @@ object EngineExecutor {
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
                 injectGatewayEnv(env, filesDir)
 
-                streamProcess(pb, onOutputLine)
+                streamProcess(pb, onOutputLine, timeoutMs = timeoutMs, trackAsActive = trackAsActive)
             } catch (e: Exception) {
                 onOutputLine("Direct engine execution failed: ${e.message}", true)
                 -1
@@ -417,7 +420,7 @@ object EngineExecutor {
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
                 injectGatewayEnv(env, filesDir)
-                streamProcess(pb, onOutputLine)
+                streamProcess(pb, onOutputLine, timeoutMs = timeoutMs, trackAsActive = trackAsActive)
             } catch (e: Exception) {
                 onOutputLine("Engine wrapper execution failed: ${e.message}", true)
                 -1
@@ -454,7 +457,9 @@ object EngineExecutor {
 
     private fun streamProcess(
         pb: ProcessBuilder,
-        onOutputLine: (String, Boolean) -> Unit
+        onOutputLine: (String, Boolean) -> Unit,
+        timeoutMs: Long? = null,
+        trackAsActive: Boolean = true
     ): Int {
         val process = try {
             pb.start()
@@ -462,7 +467,9 @@ object EngineExecutor {
             onOutputLine("Failed to launch process: ${e.message}", true)
             return -1
         }
-        activeAgyProcess = process
+        if (trackAsActive) {
+            activeAgyProcess = process
+        }
 
         try {
             val stdoutThread = Thread {
@@ -490,19 +497,37 @@ object EngineExecutor {
             stdoutThread.start()
             stderrThread.start()
 
-            val exitCode = try {
-                process.waitFor()
-            } catch (e: Exception) {
-                -1
-            } finally {
-                try { process.outputStream.close() } catch (e: Exception) {}
+            val exitCode = if (timeoutMs != null && timeoutMs > 0L) {
+                try { process.outputStream.close() } catch (_: Exception) {}
+                val finished = try {
+                    process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                } catch (_: Exception) {
+                    false
+                }
+                if (!finished) {
+                    try { process.destroyForcibly() } catch (_: Exception) {}
+                    try { stdoutThread.join(500) } catch (_: Exception) {}
+                    try { stderrThread.join(500) } catch (_: Exception) {}
+                    return -2
+                }
+                try { process.exitValue() } catch (_: Exception) { -1 }
+            } else {
+                try {
+                    process.waitFor()
+                } catch (e: Exception) {
+                    -1
+                } finally {
+                    try { process.outputStream.close() } catch (e: Exception) {}
+                }
             }
 
             try { stdoutThread.join(1000) } catch (e: Exception) {}
             try { stderrThread.join(1000) } catch (e: Exception) {}
             return exitCode
         } finally {
-            activeAgyProcess = null
+            if (trackAsActive && activeAgyProcess === process) {
+                activeAgyProcess = null
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import android.util.Log
 import id.vern.antigravity.nativebridge.RustTurboBridge
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.concurrent.TimeUnit
 
 object CoreBinaryPatcher {
     private const val TAG = "CoreBinaryPatcher"
@@ -29,12 +30,22 @@ object CoreBinaryPatcher {
         return content == expected
     }
 
-    private fun markAsPatched(binaryFile: File) {
+    fun markAsPatched(binaryFile: File) {
         try {
             val marker = File(binaryFile.parentFile, ".${binaryFile.name}.patched")
             val content = "${binaryFile.length()}_${binaryFile.lastModified()}"
             marker.writeText(content)
         } catch (e: Exception) {}
+    }
+
+    internal fun buildPythonPatchEnv(prefixDir: File): Map<String, String> {
+        val filesDir = prefixDir.parentFile ?: prefixDir
+        return mapOf(
+            "LD_LIBRARY_PATH" to "${File(prefixDir, "lib").absolutePath}:/system/lib64",
+            "PREFIX" to prefixDir.absolutePath,
+            "PATH" to "${File(prefixDir, "bin").absolutePath}:/system/bin",
+            "TMPDIR" to File(filesDir, "tmp").absolutePath
+        )
     }
 
     fun patchBinary(context: Context, binaryFile: File): Boolean {
@@ -45,8 +56,6 @@ object CoreBinaryPatcher {
         if (isAlreadyPatched(binaryFile)) {
             return true
         }
-
-        var success = false
 
         val prefix = BootstrapInstaller.prefixDir(context)
         val candidatePython = listOf(
@@ -63,13 +72,42 @@ object CoreBinaryPatcher {
         if (candidatePython != null && candidateScript != null) {
             try {
                 val pb = ProcessBuilder(candidatePython.absolutePath, candidateScript.absolutePath, "--allow-missing", binaryFile.absolutePath)
+                pb.redirectErrorStream(true)
                 pb.environment().remove("LD_PRELOAD")
+                pb.environment().putAll(buildPythonPatchEnv(prefix))
                 val proc = pb.start()
-                val code = proc.waitFor()
-                if (code == 0) {
-                    Log.i(TAG, "Successfully patched ${binaryFile.name} via Python patch pipeline")
-                    markAsPatched(binaryFile)
-                    return true
+                val outBuf = StringBuilder()
+                val drainThread = Thread({
+                    try {
+                        proc.inputStream.bufferedReader().use { reader ->
+                            var line: String?
+                            while (reader.readLine().also { line = it } != null) {
+                                if (outBuf.length < 4096) {
+                                    if (outBuf.isNotEmpty()) outBuf.append('\n')
+                                    outBuf.append(line)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }, "CorePatch-Python").apply {
+                    isDaemon = true
+                    start()
+                }
+                try { proc.outputStream.close() } catch (_: Exception) {}
+                val finished = proc.waitFor(30, TimeUnit.SECONDS)
+                if (!finished) {
+                    proc.destroyForcibly()
+                    try { drainThread.join(250) } catch (_: Exception) {}
+                    Log.w(TAG, "Python patch pipeline timed out for ${binaryFile.name}, falling back")
+                } else {
+                    try { drainThread.join(500) } catch (_: Exception) {}
+                    val code = proc.exitValue()
+                    if (code == 0) {
+                        Log.i(TAG, "Successfully patched ${binaryFile.name} via Python patch pipeline")
+                        markAsPatched(binaryFile)
+                        return true
+                    }
+                    Log.w(TAG, "Python patch exited $code: ${outBuf.toString().take(300)}")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Python patch execution failed, falling back to direct patching: ${e.message}")
@@ -91,39 +129,32 @@ object CoreBinaryPatcher {
                 if ((nativeMask and RustTurboBridge.PATCH_BIT_RESOLV) != 0) {
                     Log.i(TAG, "[Rust] Patched resolv.conf in ${binaryFile.name}")
                 }
-                success = nativeMask != 0
-                if (success) {
-                    markAsPatched(binaryFile)
+                if (nativeMask == 0) {
+                    Log.i(TAG, "${binaryFile.name} already clean (0 unpatched patterns); marked patched")
                 }
-                return success
+                markAsPatched(binaryFile)
+                return true
             }
 
-            var patchedAny = false
             if (patchInPlace(binaryFile, FACCESSAT2_TARGET, FACCESSAT2_REPL)) {
-                patchedAny = true
                 Log.i(TAG, "Patched faccessat2 -> faccessat in ${binaryFile.name}")
             }
             if (patchInPlace(binaryFile, FCHMODAT2_TARGET, FCHMODAT2_REPL)) {
-                patchedAny = true
                 Log.i(TAG, "Patched fchmodat2 -> fchmodat in ${binaryFile.name}")
             }
             if (patchInPlace(binaryFile, PTY_SHELL_TARGET, PTY_SHELL_REPL)) {
-                patchedAny = true
                 Log.i(TAG, "Patched pty shell /bin/bash -> /bin///sh in ${binaryFile.name}")
             }
             if (patchInPlace(binaryFile, RESOLV_TARGET, RESOLV_REPL)) {
-                patchedAny = true
                 Log.i(TAG, "Patched resolv.conf in ${binaryFile.name}")
             }
-            success = patchedAny
-            if (success) {
-                markAsPatched(binaryFile)
-            }
+            markAsPatched(binaryFile)
+            return true
         } catch (e: Exception) {
             Log.e(TAG, "Direct binary patching failed for ${binaryFile.name}: ${e.message}", e)
         }
 
-        return success
+        return false
     }
 
     private fun patchInPlace(file: File, target: ByteArray, replacement: ByteArray): Boolean {

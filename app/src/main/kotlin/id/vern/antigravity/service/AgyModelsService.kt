@@ -7,7 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
@@ -247,13 +246,13 @@ object AgyModelsService {
         val stdout = StringBuffer()
         val stderrLines = Collections.synchronizedList(mutableListOf<String>())
         val exit = try {
-            withTimeoutOrNull(QUERY_TIMEOUT_MS) {
-                EngineExecutor.executeAgy(context, args) { line, isError ->
-                    if (isError) stderrLines.add(line) else stdout.appendLine(line)
-                }
-            } ?: run {
-                EngineExecutor.stopAgyProcess()
-                -2
+            EngineExecutor.executeAgy(
+                context = context,
+                args = args,
+                timeoutMs = QUERY_TIMEOUT_MS,
+                trackAsActive = false
+            ) { line, isError ->
+                if (isError) stderrLines.add(line) else stdout.appendLine(line)
             }
         } catch (e: Exception) {
             Log.w(TAG, "CLI model query failed to launch: ${e.message}")

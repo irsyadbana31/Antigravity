@@ -86,7 +86,8 @@ def get_running_pid():
     try:
         with open(PID_FILE, "r") as f:
             pid = int(f.read().strip())
-        os.kill(pid, 0)
+        if not is_our_daemon(pid):
+            return None
         return pid
     except (ValueError, OSError):
         return None
@@ -126,6 +127,7 @@ def daemonize():
     log_fd = open(LOG_FILE, "a", encoding="utf-8")
     os.dup2(log_fd.fileno(), sys.stdout.fileno())
     os.dup2(log_fd.fileno(), sys.stderr.fileno())
+    log_fd.close()
 
     def sig_handler(signum, frame):
         log(f"Daemon received signal {signum}. Shutting down...")

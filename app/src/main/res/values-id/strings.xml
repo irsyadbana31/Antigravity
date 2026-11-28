@@ -405,7 +405,7 @@
     <string name="terminal_status_ready">Terminal: Siap</string>
     <string name="terminal_action_clear">Bersihkan</string>
 
-    <string name="daemon_task_interval">Setiap %1$dd</string>
+    <string name="daemon_task_interval">Setiap %1$d dtk</string>
     <string name="daemon_task_cron">Cron: %1$s</string>
     <string name="daemon_task_status_active">Aktif</string>
     <string name="daemon_task_status_disabled">Nonaktif</string>

@@ -23,6 +23,19 @@ class WakeLockHolder(
         private const val WIFI_LOCK_TAG = "id.vern.antigravity:wifilock"
         private const val DEFAULT_TIMEOUT_MS = 10 * 60 * 1000L
         private const val MAX_TAGGED_TIMEOUT_MS = 60 * 60 * 1000L
+
+        internal fun resolveLockTag(packageName: String, rawTag: String): String {
+            if (packageName.isNotBlank() &&
+                packageName != "id.vern.antigravity" &&
+                rawTag.startsWith("id.vern.antigravity:")
+            ) {
+                return "$packageName:${rawTag.removePrefix("id.vern.antigravity:")}"
+            }
+            return rawTag
+        }
+
+        internal fun resolveWifiLockTag(packageName: String): String =
+            if (packageName.isNotBlank()) "$packageName:wifilock" else WIFI_LOCK_TAG
     }
 
     private data class TaggedEntry(
@@ -30,8 +43,13 @@ class WakeLockHolder(
         val wantsWifi: Boolean
     )
 
+    @Volatile
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile
+    private var effectiveLockTag: String = lockTag
+    @Volatile
     private var primaryWantsWifi: Boolean = false
+    @Volatile
     private var wifiLock: WifiManager.WifiLock? = null
     private val taggedLocks = ConcurrentHashMap<String, TaggedEntry>()
 
@@ -41,14 +59,16 @@ class WakeLockHolder(
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         withWifiLock: Boolean = false
     ) {
-        cleanupExpired()
+        cleanupExpiredLocked()
         val safeTimeout = timeoutMs.coerceAtLeast(1_000L)
         try {
             val appCtx = context.applicationContext
+            val resolvedTag = resolveLockTag(appCtx.packageName, lockTag)
+            effectiveLockTag = resolvedTag
             val pm = appCtx.getSystemService(Context.POWER_SERVICE) as? PowerManager
             if (pm != null) {
                 if (wakeLock == null) {
-                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, lockTag).apply {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, resolvedTag).apply {
                         setReferenceCounted(false)
                     }
                 }
@@ -57,7 +77,7 @@ class WakeLockHolder(
                 // without dropping the lock in between.
                 wakeLock?.acquire(safeTimeout)
                 if (!wasHeld) {
-                    Log.i(TAG, "Partial WakeLock acquired [$lockTag] (timeout=${safeTimeout}ms, wifi=$withWifiLock)")
+                    Log.i(TAG, "Partial WakeLock acquired [$resolvedTag] (timeout=${safeTimeout}ms, wifi=$withWifiLock)")
                 }
             }
             primaryWantsWifi = withWifiLock
@@ -72,7 +92,7 @@ class WakeLockHolder(
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
-                Log.i(TAG, "Partial WakeLock released [$lockTag]")
+                Log.i(TAG, "Partial WakeLock released [$effectiveLockTag]")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to release WakeLock: ${e.message}")
@@ -90,14 +110,15 @@ class WakeLockHolder(
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         withWifiLock: Boolean = true
     ): Boolean {
-        cleanupExpired()
+        cleanupExpiredLocked()
         val safeTag = tag.ifBlank { "agy_task" }.take(48)
         val clampedTimeout = if (timeoutMs <= 0L) DEFAULT_TIMEOUT_MS else timeoutMs.coerceIn(1_000L, MAX_TAGGED_TIMEOUT_MS)
         return try {
             val appCtx = context.applicationContext
+            val resolvedBaseTag = resolveLockTag(appCtx.packageName, lockTag)
             val pm = appCtx.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
             val existing = taggedLocks[safeTag]
-            val lock = existing?.lock ?: pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$lockTag:$safeTag").apply {
+            val lock = existing?.lock ?: pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$resolvedBaseTag:$safeTag").apply {
                 setReferenceCounted(false)
             }
             // Atomic renew without release gap
@@ -118,7 +139,7 @@ class WakeLockHolder(
 
     @Synchronized
     fun releaseTagged(tag: String): Boolean {
-        cleanupExpired()
+        cleanupExpiredLocked()
         val safeTag = tag.ifBlank { "agy_task" }.take(48)
         val entry = taggedLocks.remove(safeTag)
         if (entry != null) {
@@ -131,11 +152,12 @@ class WakeLockHolder(
             }
         }
         syncWifiLockLocked(null)
-        return false
+        return entry != null
     }
 
+    @Synchronized
     fun isTaggedHeld(tag: String): Boolean {
-        cleanupExpired()
+        cleanupExpiredLocked()
         val safeTag = tag.ifBlank { "agy_task" }.take(48)
         val entry = taggedLocks[safeTag]
         val held = entry != null && entry.lock.isHeld
@@ -145,7 +167,12 @@ class WakeLockHolder(
         return held
     }
 
+    @Synchronized
     fun cleanupExpired() {
+        cleanupExpiredLocked()
+    }
+
+    private fun cleanupExpiredLocked() {
         var removedAny = false
         val it = taggedLocks.entries.iterator()
         while (it.hasNext()) {
@@ -156,9 +183,7 @@ class WakeLockHolder(
             }
         }
         if (removedAny) {
-            synchronized(this) {
-                syncWifiLockLocked(null)
-            }
+            syncWifiLockLocked(null)
         }
     }
 
@@ -177,7 +202,7 @@ class WakeLockHolder(
                     WifiManager.WIFI_MODE_FULL_HIGH_PERF
                 }
                 if (wifiLock == null) {
-                    wifiLock = wm.createWifiLock(mode, WIFI_LOCK_TAG).apply {
+                    wifiLock = wm.createWifiLock(mode, resolveWifiLockTag(ctx.packageName)).apply {
                         setReferenceCounted(false)
                     }
                 }
@@ -222,20 +247,20 @@ class WakeLockHolder(
     }
 
     val isPrimaryHeld: Boolean
-        get() = wakeLock?.isHeld == true
+        @Synchronized get() = wakeLock?.isHeld == true
 
     val isWifiLockHeld: Boolean
-        get() = wifiLock?.isHeld == true
+        @Synchronized get() = wifiLock?.isHeld == true
 
     val activeTaggedCount: Int
-        get() {
-            cleanupExpired()
+        @Synchronized get() {
+            cleanupExpiredLocked()
             return taggedLocks.size
         }
 
     val isHeld: Boolean
-        get() {
-            cleanupExpired()
+        @Synchronized get() {
+            cleanupExpiredLocked()
             return wakeLock?.isHeld == true || taggedLocks.values.any { it.lock.isHeld }
         }
 }

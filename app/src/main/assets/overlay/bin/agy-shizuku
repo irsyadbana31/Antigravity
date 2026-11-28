@@ -306,7 +306,8 @@ def cmd_diag(args):
             f"dumpsys activity services {q} | grep -q 'isForeground=true' && echo 'fgs_active=true' || echo 'fgs_active=false'; "
             f"UID_BG=$(dumpsys package {q} | grep -m1 'appId=' | sed 's/.*appId=//;s/ .*//' | tr -dc '0-9'); "
             "if [ -n \"$UID_BG\" ] && [ -r \"/sys/fs/cgroup/apps/uid_${UID_BG}/cgroup.freeze\" ]; then echo \"cgroup_frozen=$(cat /sys/fs/cgroup/apps/uid_${UID_BG}/cgroup.freeze 2>/dev/null)\"; fi; "
-            f"dumpsys power | grep -A 15 'Wake Locks:' | grep -q {q} && echo 'wakelock_active=true' || echo 'wakelock_active=false'"
+            f"WL_SEC=$(dumpsys power | sed -n '/Wake Locks:/,/^$/p'); "
+            f"if printf '%s\\n' \"$WL_SEC\" | grep -Fq {q} || {{ [ -n \"$UID_BG\" ] && printf '%s\\n' \"$WL_SEC\" | grep -Eq \"uid=${{UID_BG}}([^0-9]|$)\"; }}; then echo 'wakelock_active=true'; else echo 'wakelock_active=false'; fi"
         )
         res = gw_exec(shell_diag)
         if not res.get("ok"):

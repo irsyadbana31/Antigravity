@@ -78,6 +78,9 @@ object ShizukuManager {
     private var statusChangedCallback: (() -> Unit)? = null
 
     @Volatile
+    var onBinderReadyCallback: (() -> Unit)? = null
+
+    @Volatile
     private var boundShellService: IShizukuShellService? = null
 
     @Volatile
@@ -88,6 +91,7 @@ object ShizukuManager {
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         statusChangedCallback?.invoke()
+        onBinderReadyCallback?.invoke()
     }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
@@ -96,9 +100,12 @@ object ShizukuManager {
         statusChangedCallback?.invoke()
     }
 
-    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == PERMISSION_REQUEST_CODE) {
             statusChangedCallback?.invoke()
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                onBinderReadyCallback?.invoke()
+            }
         }
     }
 

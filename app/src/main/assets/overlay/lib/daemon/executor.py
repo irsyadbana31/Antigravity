@@ -45,13 +45,21 @@ RUNNING_LOCK = threading.Lock()
 def log(msg):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{ts}] {msg}"
-    print(formatted, flush=True)
+    wrote_via_file = False
+    same_as_stdout = False
     try:
         os.makedirs(CONFIG_DIR, exist_ok=True)
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
+            wrote_via_file = True
+            try:
+                same_as_stdout = os.path.sameopenfile(sys.stdout.fileno(), f.fileno())
+            except Exception:
+                same_as_stdout = False
     except Exception:
         pass
+    if not same_as_stdout and (not wrote_via_file or sys.stdout.isatty()):
+        print(formatted, flush=True)
 
 
 def notify(title, message, tag=None):

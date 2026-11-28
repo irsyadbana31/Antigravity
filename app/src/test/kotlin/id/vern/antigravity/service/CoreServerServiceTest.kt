@@ -90,4 +90,31 @@ class CoreServerServiceTest {
         assertEquals("Agent working (2m 5s)…", CoreServerService.formatActiveTurnStatus(125L, "Agent working"))
         assertEquals("Agent working…", CoreServerService.formatActiveTurnStatus(-3L, ""))
     }
+
+    @Test
+    fun shouldUseStartForegroundService_avoidsFgsTimerOnRunningControlUpdates() {
+        // Pre-Oreo never uses startForegroundService
+        assertFalse(CoreServerService.shouldUseStartForegroundService(24, false, CoreServerService.ACTION_START))
+        // Stop never uses startForegroundService
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, true, CoreServerService.ACTION_STOP))
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, false, CoreServerService.ACTION_STOP))
+
+        // When service is stopped, even control actions promote via FGS
+        assertTrue(CoreServerService.shouldUseStartForegroundService(35, false, CoreServerService.ACTION_START))
+        assertTrue(CoreServerService.shouldUseStartForegroundService(35, false, CoreServerService.ACTION_AGENT_TURN_STATE))
+        assertTrue(CoreServerService.shouldUseStartForegroundService(35, false, CoreServerService.ACTION_SET_PERFORMANCE_MODE))
+
+        // When service is already running, control actions use startService to avoid 5s FGS start timeout
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, true, CoreServerService.ACTION_ENSURE_ALIVE))
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, true, CoreServerService.ACTION_SET_KEEP_ALIVE))
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, true, CoreServerService.ACTION_SET_PERFORMANCE_MODE))
+        assertFalse(CoreServerService.shouldUseStartForegroundService(35, true, CoreServerService.ACTION_AGENT_TURN_STATE))
+    }
+
+    @Test
+    fun isDaemonCmdline_matchesOnlyAgyDaemonProcess() {
+        assertTrue(CoreServerService.isDaemonCmdline("/data/user/0/id.vern.antigravity.turbo/files/usr/bin/python3 /data/user/0/id.vern.antigravity.turbo/files/usr/bin/agy-daemon start"))
+        assertFalse(CoreServerService.isDaemonCmdline("/data/user/0/id.vern.antigravity.turbo/files/usr/bin/bash -c sleep 60"))
+        assertFalse(CoreServerService.isDaemonCmdline(""))
+    }
 }

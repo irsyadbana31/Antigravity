@@ -358,7 +358,7 @@ object BootstrapInstaller {
                     val parts = l.split("←")
                     if (parts.size != 2) continue
 
-                    val target = parts[0].trim()
+                    val target = TermuxShebangRewriter.rewritePrefixPath(parts[0].trim(), prefix.absolutePath)
                     var relPath = parts[1].trim()
                     if (relPath.startsWith("./")) {
                         relPath = relPath.substring(2)
@@ -801,6 +801,11 @@ object BootstrapInstaller {
 
         TermuxShebangRewriter.rewriteDirectory(File(prefix, "bin"), prefix.absolutePath)
         TermuxShebangRewriter.rewriteDirectory(File(prefix, "pkg"), prefix.absolutePath)
+        val symlinkMarker = File(prefix, ".symlinks_fixed_${context.packageName}")
+        if (!symlinkMarker.isFile) {
+            TermuxShebangRewriter.rewriteBrokenSymlinks(prefix, prefix.absolutePath)
+            try { symlinkMarker.writeText("1\n") } catch (_: Exception) {}
+        }
 
         File(prefix, "share/git-core/templates").mkdirs()
         val dirs = listOf(
@@ -859,7 +864,11 @@ object BootstrapInstaller {
 object TermuxShebangRewriter {
     private const val TAG = "TermuxShebangRewriter"
     private val PREFIX_PATTERN = Regex("""/data/(?:data|user/\d+)/[^/\s"']+/files/usr""")
-    private val ENV_SHEBANG_PATTERN = Regex("""^#!\s*/usr/bin/env\s+(\S+)""")
+    private val ENV_S_SHEBANG_PATTERN = Regex("""^#!\s*/usr/bin/env(\s+-[A-Za-z].*)$""")
+    private val ENV_SHEBANG_PATTERN = Regex("""^#!\s*/usr/bin/env\s+(?!-[A-Za-z])(\S+)""")
+
+    fun rewritePrefixPath(path: String, newPrefix: String): String =
+        path.replace(PREFIX_PATTERN, newPrefix)
 
     fun isSymlink(file: File): Boolean {
         return try {
@@ -898,7 +907,12 @@ object TermuxShebangRewriter {
         if (isShebang) {
             val lines = modified.split("\n", limit = 2)
             val firstLine = lines[0]
-            val rewrittenFirstLine = firstLine.replace(ENV_SHEBANG_PATTERN, "#!$newPrefix/bin/$1")
+            val safePrefix = Regex.escapeReplacement(newPrefix)
+            val rewrittenFirstLine = if (ENV_S_SHEBANG_PATTERN.containsMatchIn(firstLine)) {
+                firstLine.replace(ENV_S_SHEBANG_PATTERN, "#!$safePrefix/bin/env$1")
+            } else {
+                firstLine.replace(ENV_SHEBANG_PATTERN, "#!$safePrefix/bin/$1")
+            }
             if (rewrittenFirstLine != firstLine) {
                 modified = if (lines.size > 1) rewrittenFirstLine + "\n" + lines[1] else rewrittenFirstLine
             }
@@ -917,6 +931,35 @@ object TermuxShebangRewriter {
             }
         }
         return false
+    }
+
+    fun rewriteBrokenSymlinks(dir: File, newPrefix: String): Int {
+        if (!dir.exists() || !dir.isDirectory) return 0
+        var count = 0
+        val stack = ArrayDeque<File>()
+        stack.addLast(dir)
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            val children = current.listFiles() ?: continue
+            for (entry in children) {
+                if (isSymlink(entry)) {
+                    try {
+                        val target = Os.readlink(entry.absolutePath)
+                        val rewritten = rewritePrefixPath(target, newPrefix)
+                        if (rewritten != target) {
+                            try { Os.remove(entry.absolutePath) } catch (_: Exception) {}
+                            Os.symlink(rewritten, entry.absolutePath)
+                            count++
+                        }
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Skipped symlink rewrite ${entry.absolutePath}: ${e.message}")
+                    }
+                } else if (entry.isDirectory) {
+                    stack.addLast(entry)
+                }
+            }
+        }
+        return count
     }
 
     fun rewriteDirectory(dir: File, newPrefix: String): Int {

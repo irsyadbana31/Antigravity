@@ -122,6 +122,21 @@ private val AuroraColorInts = intArrayOf(
     0xFF4285F4.toInt()
 )
 
+private val AuroraGlowNodes = listOf(
+    Pair(Color(0xFF4285F4), 0f),
+    Pair(Color(0xFF8B5CF6), 60f),
+    Pair(Color(0xFFEA4335), 120f),
+    Pair(Color(0xFFFBBC05), 180f),
+    Pair(Color(0xFF34A853), 240f),
+    Pair(Color(0xFF24C6DC), 300f)
+)
+
+private class CachedSweepHolder {
+    var width: Float = -1f
+    var height: Float = -1f
+    var shader: android.graphics.SweepGradient? = null
+}
+
 private data class MentionItem(
     val token: String,
     val descRes: Int,
@@ -238,26 +253,34 @@ fun ChatInputBar(
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "AgentCardAurora")
-    val rotationDegrees by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 10000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "AuroraRotation"
-    )
-    val pulseGlow by infiniteTransition.animateFloat(
-        initialValue = 0.88f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "AuroraPulse"
-    )
+    val rotationDegrees: Float
+    val pulseGlow: Float
+    if (isExecuting) {
+        val infiniteTransition = rememberInfiniteTransition(label = "AgentCardAurora")
+        rotationDegrees = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 10000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "AuroraRotation"
+        ).value
+        pulseGlow = infiniteTransition.animateFloat(
+            initialValue = 0.88f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 3500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "AuroraPulse"
+        ).value
+    } else {
+        rotationDegrees = 35f
+        pulseGlow = 0.92f
+    }
 
+    val cachedSweep = remember { CachedSweepHolder() }
     val rotationMatrix = remember { android.graphics.Matrix() }
     val borderStrokePaint = remember {
         Paint().apply {
@@ -748,7 +771,7 @@ fun ChatInputBar(
                 modifier = Modifier
                     .matchParentSize()
                     .then(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isExecuting) {
                             Modifier.blur(radius = 24.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                         } else {
                             Modifier
@@ -764,16 +787,7 @@ fun ChatInputBar(
                 val ry = (h / 2f) * 0.88f
                 val spotRadius = maxOf(h * 0.95f, 65.dp.toPx()) * pulseGlow
 
-                val glowNodes = listOf(
-                    Pair(Color(0xFF4285F4), 0f),
-                    Pair(Color(0xFF8B5CF6), 60f),
-                    Pair(Color(0xFFEA4335), 120f),
-                    Pair(Color(0xFFFBBC05), 180f),
-                    Pair(Color(0xFF34A853), 240f),
-                    Pair(Color(0xFF24C6DC), 300f)
-                )
-
-                for ((color, angleOffset) in glowNodes) {
+                for ((color, angleOffset) in AuroraGlowNodes) {
                     val rad = (rotationDegrees + angleOffset) * (Math.PI.toFloat() / 180f)
                     val px = cx + rx * cos(rad)
                     val py = cy + ry * sin(rad)
@@ -808,12 +822,24 @@ fun ChatInputBar(
                         val halfStroke = strokeWidth / 2f
                         val cornerRadius = 20.dp.toPx()
 
-                        val sweepShader = android.graphics.SweepGradient(
-                            size.width / 2f,
-                            size.height / 2f,
-                            AuroraColorInts,
-                            null
-                        )
+                        val sweepShader = if (
+                            cachedSweep.shader != null &&
+                            cachedSweep.width == size.width &&
+                            cachedSweep.height == size.height
+                        ) {
+                            cachedSweep.shader!!
+                        } else {
+                            android.graphics.SweepGradient(
+                                size.width / 2f,
+                                size.height / 2f,
+                                AuroraColorInts,
+                                null
+                            ).also {
+                                cachedSweep.width = size.width
+                                cachedSweep.height = size.height
+                                cachedSweep.shader = it
+                            }
+                        }
                         rotationMatrix.reset()
                         rotationMatrix.postRotate(rotationDegrees, size.width / 2f, size.height / 2f)
                         sweepShader.setLocalMatrix(rotationMatrix)

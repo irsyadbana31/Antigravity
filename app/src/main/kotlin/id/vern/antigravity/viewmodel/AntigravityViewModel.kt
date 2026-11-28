@@ -203,6 +203,7 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_CLI_SLASH_COMMANDS = "ag_cli_slash_commands"
         const val KEY_CLI_SLASH_VERSION = "ag_cli_slash_version"
         const val KEY_CLI_SLASH_FETCHED_AT = "ag_cli_slash_fetched_at"
+        const val SLASH_REFRESH_MIN_INTERVAL_MS = 30_000L
         const val CLI_MODELS_THROTTLE_MS = 10L * 60L * 1000L
         const val KEY_THINKING_BUDGET = "ag_thinking_budget"
         const val KEY_VERBOSE_THINKING = "ag_verbose_thinking"
@@ -1007,7 +1008,7 @@ class AntigravityViewModel : ViewModel() {
             mutableCliModels.value = emptyList()
             refreshAuthState(context)
             CloudCodeQuotaService.restartLocalLanguageServer(context)
-            restartCoreService(context)
+            restartCoreServiceSafely(context, "account_switched")
             refreshUserQuota(context)
             refreshCliModels(context, force = true)
         }
@@ -1021,7 +1022,7 @@ class AntigravityViewModel : ViewModel() {
                 mutableCodeAssistTier.value = null
                 mutableCliModels.value = emptyList()
                 CloudCodeQuotaService.restartLocalLanguageServer(context)
-                restartCoreService(context)
+                restartCoreServiceSafely(context, "account_removed")
                 refreshUserQuota(context)
                 refreshCliModels(context, force = true)
             }
@@ -1038,7 +1039,7 @@ class AntigravityViewModel : ViewModel() {
                 AgyModelsService.invalidateCache()
                 refreshAuthState(context)
                 CloudCodeQuotaService.restartLocalLanguageServer(context)
-                restartCoreService(context)
+                restartCoreServiceSafely(context, "oauth_signed_in")
                 refreshCliModels(context, force = true)
                 addLog("Auth", "Google sign-in successful: $email")
                 Toast.makeText(context, context.getString(R.string.auth_signed_in_success, email ?: ""), Toast.LENGTH_SHORT).show()
@@ -1064,7 +1065,7 @@ class AntigravityViewModel : ViewModel() {
                 mutableCliModels.value = emptyList()
                 AgyModelsService.invalidateCache()
                 CloudCodeQuotaService.restartLocalLanguageServer(context)
-                restartCoreService(context)
+                restartCoreServiceSafely(context, "account_change_resume")
                 addLog("Auth", "Account switch detected on app resume: $email")
                 refreshAuthState(context)
                 refreshCliModels(context, force = true)
@@ -1117,7 +1118,7 @@ class AntigravityViewModel : ViewModel() {
                     delay(1500)
                     OAuthManager.checkAndImportExistingToken(context)
                     refreshAuthState(context)
-                    restartCoreService(context)
+                    restartCoreServiceSafely(context, "oauth_stdin_code")
                 }
             },
             onSuccess = { email ->
@@ -1126,7 +1127,7 @@ class AntigravityViewModel : ViewModel() {
                 mutableCliModels.value = emptyList()
                 AgyModelsService.invalidateCache()
                 refreshAuthState(context)
-                restartCoreService(context)
+                restartCoreServiceSafely(context, "oauth_manual_code")
                 refreshCliModels(context, force = true)
                 addLog("Auth", "Google sign-in successful: $email")
                 Toast.makeText(context, context.getString(R.string.auth_signed_in_success, email ?: ""), Toast.LENGTH_SHORT).show()
@@ -1149,7 +1150,7 @@ class AntigravityViewModel : ViewModel() {
                 settingsPreferencesDelegate.setSelectedModelDirect("")
                 settingsPreferencesDelegate.setThinkingBudgetDirect("")
                 CloudCodeQuotaService.restartLocalLanguageServer(context)
-                restartCoreService(context)
+                restartCoreServiceSafely(context, "oauth_signed_out")
             },
             onLog = ::addLog
         )
@@ -1398,13 +1399,15 @@ class AntigravityViewModel : ViewModel() {
     }
 
     fun checkForCoreEngineUpdate(context: Context, force: Boolean = false) {
-        val current = CoreUpdateManager.getCurrentVersion(context)
-        coreUpdateState.value = coreUpdateState.value.copy(
-            isChecking = true,
-            currentVersion = current,
-            error = null
-        )
+        val prev = coreUpdateState.value
+        val now = System.currentTimeMillis()
+        if (!force && prev.lastCheckedTime > 0 && now - prev.lastCheckedTime < 15 * 60 * 1000L) {
+            return
+        }
+        coreUpdateState.value = prev.copy(isChecking = true, error = null)
         viewModelScope.launch(Dispatchers.IO) {
+            val current = CoreUpdateManager.getCurrentVersion(context)
+            coreUpdateState.value = coreUpdateState.value.copy(currentVersion = current)
             val updated = CoreUpdateDelegate.checkForCoreEngineUpdate(context, force, coreUpdateState.value)
             if (updated != null) {
                 coreUpdateState.value = updated
@@ -1530,6 +1533,15 @@ class AntigravityViewModel : ViewModel() {
             delay(500)
             startCoreService(context)
         }
+    }
+
+    private fun restartCoreServiceSafely(context: Context, reason: String) {
+        if (mutableIsExecuting.value || AcpSessionPool.isTurnRunning()) {
+            AcpSessionPool.invalidate(reason)
+            addLog("Engine", "Deferred Core Server restart ($reason) while agent turn is active; warm ACP session scheduled for post-turn recycle")
+            return
+        }
+        restartCoreService(context)
     }
 
     fun addLog(tag: String, message: String, isError: Boolean = false) {
@@ -1795,9 +1807,20 @@ class AntigravityViewModel : ViewModel() {
     private val mutableSlashActions = MutableStateFlow<List<SlashAction>>(SYSTEM_SLASH_COMMANDS)
     val slashActions: StateFlow<List<SlashAction>> = mutableSlashActions.asStateFlow()
     private var slashRefreshJob: Job? = null
+    @Volatile
+    private var lastSlashRefreshAtMs: Long = 0L
+    @Volatile
+    private var lastSlashSummaryKey: String = ""
 
-    fun refreshCliSlashCommands(context: Context) {
+    fun refreshCliSlashCommands(context: Context, force: Boolean = false) {
         if (slashRefreshJob?.isActive == true) return
+        val now = System.currentTimeMillis()
+        if (!force &&
+            mutableSlashActions.value.size > SYSTEM_SLASH_COMMANDS.size &&
+            (now - lastSlashRefreshAtMs) < SLASH_REFRESH_MIN_INTERVAL_MS
+        ) {
+            return
+        }
         slashRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             try {
 
@@ -1817,8 +1840,7 @@ class AntigravityViewModel : ViewModel() {
 
                 var cliCommands = cached
                 if (!EngineExecutor.isAgyRunning() && !mutableIsExecuting.value) {
-                    val version = runAgyCapture(context, listOf("--version"), 10_000L)
-                        ?.second?.lines()?.firstOrNull { it.isNotBlank() }?.trim()
+                    val version = CoreUpdateManager.getCurrentVersion(context).trim().takeIf { it.isNotEmpty() }
 
                     if (version != null && (version != cachedVersion || cached.isEmpty())) {
                         val help = runAgyCapture(context, listOf("--help"), 15_000L)
@@ -1826,6 +1848,11 @@ class AntigravityViewModel : ViewModel() {
                         if (parsed.isNotEmpty()) {
                             saveCachedSlashCommands(prefs, parsed, version)
                             cliCommands = parsed
+                        } else if (help != null) {
+                            prefs.edit()
+                                .putString(KEY_CLI_SLASH_VERSION, version)
+                                .putLong(KEY_CLI_SLASH_FETCHED_AT, System.currentTimeMillis())
+                                .apply()
                         }
                     }
                 }
@@ -1838,7 +1865,12 @@ class AntigravityViewModel : ViewModel() {
                 )
 
                 mutableSlashActions.value = allActions
-                addLog("Slash", "Loaded dynamic slash menu (${allActions.size} actions: ${skills.size} skills, ${workflows.size} workflows, ${cliCommands.size} CLI)")
+                lastSlashRefreshAtMs = System.currentTimeMillis()
+                val summaryKey = "${allActions.size}:${skills.size}:${workflows.size}:${cliCommands.size}"
+                if (summaryKey != lastSlashSummaryKey) {
+                    lastSlashSummaryKey = summaryKey
+                    addLog("Slash", "Loaded dynamic slash menu (${allActions.size} actions: ${skills.size} skills, ${workflows.size} workflows, ${cliCommands.size} CLI)")
+                }
             } catch (e: Exception) {
                 try {
                     val fallbackSkills = getInstalledSkills(context).map {
@@ -1903,11 +1935,15 @@ class AntigravityViewModel : ViewModel() {
             val dir = if (!currentWorkspace.isNullOrBlank()) File(currentWorkspace) else null
             if (dir != null && dir.exists() && dir.isDirectory) dir else null
         }
-        val exit = withTimeoutOrNull(timeoutMs) {
-            EngineExecutor.executeAgy(context, args, workingDir = wsDir) { line, isErr ->
-                sb.appendLine(line)
-            }
-        } ?: return null
+        val exit = EngineExecutor.executeAgy(
+            context = context,
+            args = args,
+            workingDir = wsDir,
+            timeoutMs = timeoutMs,
+            trackAsActive = false
+        ) { line, isErr ->
+            sb.appendLine(line)
+        }
         if (exit != 0) return null
         return exit to sb.toString()
     }

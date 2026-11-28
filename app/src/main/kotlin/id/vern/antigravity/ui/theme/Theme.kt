@@ -368,12 +368,7 @@ fun AntigravityTheme(
                 window.statusBarColor = colorScheme.background.toArgb()
                 @Suppress("DEPRECATION")
                 window.navigationBarColor = colorScheme.background.toArgb()
-                val isLightPreset = if (themePreset.equals(ThemePreset.CUSTOM.displayName, ignoreCase = true) || themePreset.equals(ThemePreset.CUSTOM.id, ignoreCase = true)) {
-                    val bg = parseColorOrNull(customBg) ?: Color(0xFF101010)
-                    !isColorDark(bg)
-                } else {
-                    !darkTheme
-                }
+                val isLightPreset = !isColorDark(colorScheme.background)
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = isLightPreset
                     isAppearanceLightNavigationBars = isLightPreset

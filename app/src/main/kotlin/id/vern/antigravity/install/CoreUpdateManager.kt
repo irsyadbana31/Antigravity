@@ -11,6 +11,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import org.json.JSONObject
 
@@ -25,6 +26,18 @@ data class CoreUpdateInfo(
 object CoreUpdateManager {
     private const val TAG = "CoreUpdateManager"
     const val MANIFEST_URL = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json"
+    private val SEMVER_REGEX = Regex("""^\d+\.\d+(?:\.\d+)*$""")
+
+    @Volatile
+    private var cachedVersionKey: String? = null
+
+    @Volatile
+    private var cachedVersionValue: String? = null
+
+    fun invalidateVersionCache() {
+        cachedVersionKey = null
+        cachedVersionValue = null
+    }
 
     fun getCurrentVersion(context: Context): String {
         val engineDir = BootstrapInstaller.engineDir(context)
@@ -37,6 +50,24 @@ object CoreUpdateManager {
             agyBin.isFile -> agyBin
             File(context.filesDir, "tmp/engine/bin/agy").isFile -> File(context.filesDir, "tmp/engine/bin/agy")
             else -> null
+        }
+
+        val statKey = targetBin?.let { "${it.absolutePath}:${it.length()}:${it.lastModified()}" }
+        val cachedVal = cachedVersionValue
+        if (statKey != null && statKey == cachedVersionKey && !cachedVal.isNullOrBlank()) {
+            return cachedVal
+        }
+
+        val verFile = File(engineDir, ".engine_version")
+        if (verFile.isFile) {
+            val v = runCatching { verFile.readText().trim() }.getOrDefault("")
+            if (SEMVER_REGEX.matches(v) && (targetBin == null || verFile.lastModified() >= targetBin.lastModified())) {
+                if (statKey != null) {
+                    cachedVersionKey = statKey
+                    cachedVersionValue = v
+                }
+                return v
+            }
         }
 
         if (targetBin != null && ldBin.isFile) {
@@ -53,28 +84,63 @@ object CoreUpdateManager {
                 )
                 val pb = ProcessBuilder(cmd)
                 pb.environment().remove("LD_PRELOAD")
+                pb.environment()["LD_LIBRARY_PATH"] = "${prefixLib.absolutePath}:/system/lib64"
                 val proc = pb.start()
-                val out = proc.inputStream.bufferedReader().readText().trim()
-                proc.waitFor()
-                if (proc.exitValue() == 0 && out.isNotEmpty()) {
-                    return out
+                val outBuf = StringBuilder()
+                val outThread = Thread({
+                    try {
+                        proc.inputStream.bufferedReader().use { reader ->
+                            outBuf.append(reader.readText())
+                        }
+                    } catch (_: Exception) {}
+                }, "CoreVer-Out").apply {
+                    isDaemon = true
+                    start()
+                }
+                val errThread = Thread({
+                    try { proc.errorStream.close() } catch (_: Exception) {}
+                }, "CoreVer-Err").apply {
+                    isDaemon = true
+                    start()
+                }
+                try { proc.outputStream.close() } catch (_: Exception) {}
+                val finished = proc.waitFor(4, TimeUnit.SECONDS)
+                if (!finished) {
+                    proc.destroyForcibly()
+                    try { outThread.join(250) } catch (_: Exception) {}
+                    try { errThread.join(250) } catch (_: Exception) {}
+                    Log.w(TAG, "Timed out running agy --version")
+                } else {
+                    try { outThread.join(500) } catch (_: Exception) {}
+                    try { errThread.join(250) } catch (_: Exception) {}
+                    val out = outBuf.toString().trim()
+                    if (proc.exitValue() == 0 && out.isNotEmpty()) {
+                        runCatching {
+                            engineDir.mkdirs()
+                            verFile.writeText(out)
+                        }
+                        if (statKey != null) {
+                            cachedVersionKey = statKey
+                            cachedVersionValue = out
+                        }
+                        return out
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed running agy --version: ${e.message}")
             }
         }
 
-        val verFile = File(engineDir, ".engine_version")
         if (verFile.isFile) {
-            val v = verFile.readText().trim()
+            val v = runCatching { verFile.readText().trim() }.getOrDefault("")
             if (v.isNotEmpty()) return v
         }
 
         return "1.5.3"
     }
 
-    fun checkForUpdate(context: Context): CoreUpdateInfo {
-        val currentVer = getCurrentVersion(context)
+    fun checkForUpdate(context: Context, knownCurrentVersion: String? = null): CoreUpdateInfo {
+        val currentVer = knownCurrentVersion?.takeIf { it.isNotBlank() } ?: getCurrentVersion(context)
         val (code, jsonStr) = NetworkDownloader.httpGetString(MANIFEST_URL, connectTimeout = 10000, readTimeout = 15000)
         if (code !in 200..299 || jsonStr.isNullOrBlank()) {
             return CoreUpdateInfo(currentVer, "", "", currentVer, false)
@@ -223,6 +289,7 @@ object CoreUpdateManager {
             agyBin.setReadable(true, false)
             agyBin.setExecutable(true, false)
             try { Os.chmod(agyBin.absolutePath, 493) } catch (e: Exception) {}
+            CoreBinaryPatcher.markAsPatched(agyBin)
 
             val tmpAgy = File(context.filesDir, "tmp/engine/bin/agy")
             if (tmpAgy.parentFile?.exists() == true) {
@@ -231,6 +298,7 @@ object CoreUpdateManager {
                     tmpAgy.setReadable(true, false)
                     tmpAgy.setExecutable(true, false)
                     try { Os.chmod(tmpAgy.absolutePath, 493) } catch (e: Exception) {}
+                    CoreBinaryPatcher.markAsPatched(tmpAgy)
                 } catch (e: Exception) {}
             }
 
@@ -266,9 +334,12 @@ object CoreUpdateManager {
 
             if (backupFile.exists()) backupFile.delete()
             if (stagingFile.exists()) stagingFile.delete()
+            val stagingMarker = File(cacheDir, ".${stagingFile.name}.patched")
+            if (stagingMarker.exists()) stagingMarker.delete()
             if (tarGzFile.exists()) tarGzFile.delete()
 
             File(engineDir, ".engine_version").writeText(updateInfo.version)
+            invalidateVersionCache()
 
             onProgress(1.0f, "Core engine successfully updated to v${updateInfo.version}!")
             return Result.success(updateInfo.version)
