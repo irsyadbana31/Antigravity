@@ -714,5 +714,19 @@
     <string name="agent_review_empty_search">Tidak ada berkas berubah yang cocok dengan pencarian.</string>
     <string name="agent_review_empty">Belum ada berkas yang diubah di workspace untuk ditinjau.</string>
     <string name="topbar_core_update_short">Update</string>
+    <string name="notification_agent_working">Agen sedang bekerja</string>
+    <string name="notification_engine_keepalive">Engine aktif · Keep-alive latar belakang menyala</string>
+    <string name="dev_bg_section_title">Eksekusi Latar Belakang &amp; Keep-Alive</string>
+    <string name="dev_bg_battery_title">Kebijakan Baterai &amp; Latar Belakang</string>
+    <string name="dev_bg_battery_status_unrestricted">Bebas Doze Android · Latar belakang diizinkan</string>
+    <string name="dev_bg_battery_status_restricted">Dibatasi · Dapat berhenti saat layar mati</string>
+    <string name="dev_bg_locks_active_both">Kunci keep-alive: CPU WakeLock + Wi-Fi Lock aktif</string>
+    <string name="dev_bg_locks_active_cpu">Kunci keep-alive: CPU WakeLock aktif</string>
+    <string name="dev_bg_locks_standby">Kunci keep-alive: Aktif otomatis saat agen bekerja</string>
+    <string name="dev_bg_keep_alive_title">Jaga Engine Tetap Bangun di Latar Belakang</string>
+    <string name="dev_bg_keep_alive_desc">Tahan kunci CPU &amp; Wi-Fi saat idle agar tugas daemon terjadwal dan sesi panjang tetap responsif saat layar mati.</string>
+    <string name="dev_bg_btn_allow_battery">Baterai Tanpa Batas</string>
+    <string name="dev_bg_btn_oem_settings">Pengaturan Beku / Baterai OEM</string>
+    <string name="bg_settings_unavailable_toast">Tidak dapat membuka pengaturan baterai sistem pada perangkat ini.</string>
 </resources>
 

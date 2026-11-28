@@ -11,6 +11,7 @@ import json
 import shlex
 import threading
 import subprocess
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 PREFIX = os.environ.get("PREFIX") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
@@ -118,6 +119,34 @@ def wake_antigravity_app():
         log(f"Cannot wake app: {e}")
 
 
+def _gateway_wakelock(action, tag, timeout_ms, env, wifi=True):
+    """Acquire or release a tagged CPU + Wi-Fi WakeLock via Antigravity Gateway."""
+    port = (env.get("AGY_GATEWAY_PORT") or "").strip()
+    token = (env.get("AGY_GATEWAY_TOKEN") or "").strip()
+    if not port or not token:
+        return False
+    payload = {
+        "action": action,
+        "tag": tag,
+        "timeout_ms": int(timeout_ms),
+        "wifi": bool(wifi),
+    }
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/gateway/wakelock",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-AGY-Token": token,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 def run_task_worker(task):
     task_id = task.get("id", "unknown")
     name = task.get("name", task_id)
@@ -170,6 +199,9 @@ def run_task_worker(task):
         env["AGY_PROJECT_DIR"] = project
 
     cwd = project if (project and os.path.isdir(project)) else home
+    timeout_sec = int(task.get("timeout_sec", 600))
+    wl_tag = f"daemon_{task_id}"
+    _gateway_wakelock("acquire", wl_tag, (timeout_sec + 60) * 1000, env, wifi=True)
 
     try:
         if not command and prompt:
@@ -191,7 +223,7 @@ def run_task_worker(task):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=task.get("timeout_sec", 600),
+                timeout=timeout_sec,
                 env=env,
                 cwd=cwd,
             )
@@ -202,7 +234,7 @@ def run_task_worker(task):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=task.get("timeout_sec", 600),
+                timeout=timeout_sec,
                 env=env,
                 cwd=cwd,
                 executable=BASH_BIN if os.path.isfile(BASH_BIN) else "/system/bin/sh"
@@ -215,6 +247,8 @@ def run_task_worker(task):
     except Exception as e:
         output = f"Execution error: {e}"
         log(f"Task [{name}] failed: {e}")
+    finally:
+        _gateway_wakelock("release", wl_tag, 0, env, wifi=False)
 
     duration = int(time.time() - start_t)
     status_str = "Completed successfully" if success else "Failed"

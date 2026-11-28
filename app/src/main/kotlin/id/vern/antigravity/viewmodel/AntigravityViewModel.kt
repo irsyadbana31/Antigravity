@@ -59,6 +59,7 @@ import id.vern.antigravity.service.McpServerItem
 import id.vern.antigravity.service.WakeLockHolder
 import id.vern.antigravity.service.TerminalLine
 import id.vern.antigravity.service.TerminalSessionManager
+import id.vern.antigravity.executor.AcpSessionPool
 import id.vern.antigravity.executor.AcpStreamEvent
 import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.gateway.RishHelper
@@ -74,6 +75,8 @@ import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.service.CoreServerService
 import id.vern.antigravity.util.AppLogger
 import id.vern.antigravity.util.AppUpdateState
+import id.vern.antigravity.util.OemBackgroundProfile
+import id.vern.antigravity.util.PermissionHelper
 import id.vern.antigravity.util.UpdateChecker
 import android.content.pm.PackageManager
 import kotlinx.coroutines.Dispatchers
@@ -173,6 +176,17 @@ data class TokenUsageStats(
     val totalLimit: Int = 20000
 )
 
+data class BackgroundHealthSnapshot(
+    val batteryUnrestricted: Boolean = true,
+    val backgroundRestricted: Boolean = false,
+    val serviceRunning: Boolean = false,
+    val wakeLockHeld: Boolean = false,
+    val wifiLockHeld: Boolean = false,
+    val agentTurnActive: Boolean = false,
+    val keepBackgroundAlive: Boolean = false,
+    val oemProfile: OemBackgroundProfile = PermissionHelper.detectOemBackgroundProfile()
+)
+
 class AntigravityViewModel : ViewModel() {
 
     companion object {
@@ -191,6 +205,7 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_THINKING_BUDGET = "ag_thinking_budget"
         const val KEY_VERBOSE_THINKING = "ag_verbose_thinking"
         const val KEY_NOTIFY_ON_COMPLETION = "ag_notify_on_completion"
+        const val KEY_KEEP_BACKGROUND_ALIVE = "ag_keep_background_alive"
         const val KEY_CONVERSATION_WIDTH = "ag_conversation_width"
         const val KEY_THEME_PRESET = "ag_theme_preset"
         const val KEY_CUSTOM_THEME_BG = "ag_custom_theme_bg"
@@ -274,6 +289,13 @@ class AntigravityViewModel : ViewModel() {
     val thinkingBudget: StateFlow<String> = settingsPreferencesDelegate.thinkingBudget
     val verboseThinking: StateFlow<Boolean> = settingsPreferencesDelegate.verboseThinking
     val notifyOnCompletion: StateFlow<Boolean> = settingsPreferencesDelegate.notifyOnCompletion
+    val keepBackgroundAlive: StateFlow<Boolean> = settingsPreferencesDelegate.keepBackgroundAlive
+
+    private val mutableBackgroundHealth = MutableStateFlow(BackgroundHealthSnapshot())
+    val backgroundHealth: StateFlow<BackgroundHealthSnapshot> = mutableBackgroundHealth.asStateFlow()
+
+    @Volatile
+    private var lastActivityPausedAtMs: Long = 0L
     val conversationWidth: StateFlow<String> = settingsPreferencesDelegate.conversationWidth
     val themePreset: StateFlow<String> = settingsPreferencesDelegate.themePreset
     val customThemeBg: StateFlow<String> = settingsPreferencesDelegate.customThemeBg
@@ -627,6 +649,7 @@ class AntigravityViewModel : ViewModel() {
         refreshMcpServers(context)
         loadProjects(context)
         loadConversationHistory(context)
+        refreshBackgroundHealth(context)
         if (shizukuEnabled.value) {
             refreshShizukuStatus(context)
         }
@@ -643,6 +666,39 @@ class AntigravityViewModel : ViewModel() {
 
     fun setNotifyOnCompletion(context: Context, enabled: Boolean) =
         settingsPreferencesDelegate.setNotifyOnCompletion(context, enabled)
+
+    fun setKeepBackgroundAlive(context: Context, enabled: Boolean) {
+        settingsPreferencesDelegate.setKeepBackgroundAlive(context, enabled, ::addLog)
+        refreshBackgroundHealth(context)
+    }
+
+    fun refreshBackgroundHealth(context: Context) {
+        val appCtx = context.applicationContext
+        mutableBackgroundHealth.value = BackgroundHealthSnapshot(
+            batteryUnrestricted = PermissionHelper.hasBatteryOptimizationExclusion(appCtx),
+            backgroundRestricted = PermissionHelper.isBackgroundRestricted(appCtx),
+            serviceRunning = CoreServerService.isServiceRunning,
+            wakeLockHeld = CoreServerService.isWakeLockHeld || executionWakeLock.isHeld,
+            wifiLockHeld = CoreServerService.isWifiLockHeld || executionWakeLock.isWifiLockHeld,
+            agentTurnActive = CoreServerService.isAgentTurnActive || mutableIsExecuting.value,
+            keepBackgroundAlive = keepBackgroundAlive.value,
+            oemProfile = PermissionHelper.detectOemBackgroundProfile()
+        )
+    }
+
+    fun requestBatteryOptimizationExclusion(context: Context) {
+        PermissionHelper.openBatteryOptimizationRequest(context)
+    }
+
+    fun openOemBackgroundSettings(context: Context) {
+        if (!PermissionHelper.openOemBackgroundSettings(context)) {
+            Toast.makeText(context, context.getString(R.string.bg_settings_unavailable_toast), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun onActivityPause() {
+        lastActivityPausedAtMs = System.currentTimeMillis()
+    }
 
     fun setConversationWidth(context: Context, width: String) =
         settingsPreferencesDelegate.setConversationWidth(context, width)
@@ -961,6 +1017,33 @@ class AntigravityViewModel : ViewModel() {
         if (shizukuEnabled.value) {
             refreshShizukuStatus(context)
         }
+
+        val appCtx = context.applicationContext
+        val pausedAt = lastActivityPausedAtMs
+        lastActivityPausedAtMs = 0L
+        val bgDurationMs = if (pausedAt > 0L) (System.currentTimeMillis() - pausedAt).coerceAtLeast(0L) else 0L
+
+        if (!mutableIsBooting.value) {
+            if (!CoreServerService.isServiceRunning) {
+                addLog("Engine", "CoreServerService was stopped while in background; auto-recovering...")
+            }
+            CoreServerService.ensureServiceRunning(appCtx)
+            mutableEngineStatus.update { it.copy(isRunning = true) }
+        }
+
+        if (bgDurationMs >= 60_000L) {
+            addLog(
+                "Lifecycle",
+                "Resumed after ${bgDurationMs / 1000}s in background (executing=${mutableIsExecuting.value}, fgs=${CoreServerService.isServiceRunning})"
+            )
+            if (mutableIsExecuting.value) {
+                CoreServerService.notifyAgentTurnState(appCtx, active = true)
+                executionWakeLock.acquire(appCtx, 30 * 60 * 1000L, withWifiLock = true)
+            } else {
+                AcpSessionPool.onResumedAfterLongBackground(bgDurationMs)
+            }
+        }
+        refreshBackgroundHealth(appCtx)
     }
 
     fun exchangeManualAuthCode(context: Context, rawCodeOrToken: String) =
@@ -1931,11 +2014,12 @@ class AntigravityViewModel : ViewModel() {
         executeAiTurn(context, effectiveContent, convId, currentAttachments, autoTitleSeed)
     }
 
-    private val executionWakeLock = WakeLockHolder()
+    private val executionWakeLock = WakeLockHolder("id.vern.antigravity:exec_wakelock")
     private var currentAiExecutionJob: Job? = null
 
     fun stopAiExecution() {
         executionWakeLock.release()
+        runCatching { CoreServerService.notifyAgentTurnState(AntigravityApp.instance, active = false) }
         addLog("Chat", "AI generation stopped by user")
         currentAiExecutionJob?.cancel()
         currentAiExecutionJob = null
@@ -1998,12 +2082,25 @@ class AntigravityViewModel : ViewModel() {
         attachments: List<AttachedFile> = emptyList(),
         autoTitleSeed: String? = null
     ) {
+        val appCtx = context.applicationContext
         currentAiExecutionJob?.cancel()
         currentAiExecutionJob = viewModelScope.launch(Dispatchers.IO) {
-            executionWakeLock.acquire(context, 30 * 60 * 1000L)
+            CoreServerService.ensureServiceRunning(appCtx)
+            CoreServerService.notifyAgentTurnState(appCtx, active = true)
+            executionWakeLock.acquire(appCtx, 30 * 60 * 1000L, withWifiLock = true)
+            refreshBackgroundHealth(appCtx)
             mutableIsExecuting.value = true
             mutableActiveWorkingStatus.value = "Working"
             val turnStartTime = System.currentTimeMillis()
+            var lastCheckpointSaveMs = turnStartTime
+
+            fun saveTurnCheckpointIfDue(force: Boolean = false) {
+                val now = System.currentTimeMillis()
+                if (force || now - lastCheckpointSaveMs >= 8_000L) {
+                    lastCheckpointSaveMs = now
+                    saveMessagesForConversation(appCtx, convId, mutableChatMessages.value)
+                }
+            }
 
             val assistantMsgId = UUID.randomUUID().toString()
             val initialAssistantMsg = ChatMessage(
@@ -2469,6 +2566,9 @@ class AntigravityViewModel : ViewModel() {
                                     } else msg
                                 }
                             }
+                            if (state != "ACTIVE") {
+                                saveTurnCheckpointIfDue()
+                            }
                         }
                     }
 
@@ -2897,6 +2997,7 @@ class AntigravityViewModel : ViewModel() {
                 }
             } finally {
                 executionWakeLock.release()
+                CoreServerService.notifyAgentTurnState(appCtx, active = false)
                 mutableIsExecuting.value = false
                 mutableActiveWorkingStatus.value = null
                 currentAiExecutionJob = null
@@ -2908,6 +3009,7 @@ class AntigravityViewModel : ViewModel() {
                 }
                 saveConversationHistory(context)
                 saveMessagesForConversation(context, convId, currentList)
+                refreshBackgroundHealth(appCtx)
                 processNextQueuedMessage(context)
                 refreshUserQuota(context, minIntervalMs = QUOTA_AUTO_REFRESH_TTL_MS)
             }

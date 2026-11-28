@@ -22,8 +22,10 @@ import android.system.Os
 import android.util.Log
 import android.widget.Toast
 import id.vern.antigravity.install.LseCompatHelper
+import id.vern.antigravity.service.CoreServerService
 import id.vern.antigravity.service.WakeLockHolder
 import id.vern.antigravity.util.AppLogger
+import id.vern.antigravity.util.PermissionHelper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -300,7 +302,7 @@ class SystemGatewayServer(
                 }
             }
 
-            return JSONObject()
+            val result = JSONObject()
                 .put("package", pkg)
                 .put("version_name", versionName ?: JSONObject.NULL)
                 .put("version_code", versionCode ?: JSONObject.NULL)
@@ -311,6 +313,25 @@ class SystemGatewayServer(
                 .put("meminfo", memJson)
                 .put("gfxinfo", gfxJson)
                 .put("recent_anrs", anrArray)
+
+            val bgSec = sections["BG"].orEmpty()
+            if (bgSec.isNotBlank()) {
+                val dozeWhitelist = Regex("""(?m)^doze_whitelist=(true|false)""").find(bgSec)?.groupValues?.getOrNull(1)?.toBooleanStrictOrNull()
+                val standbyBucket = firstInt("""(?m)^standby_bucket=(\d+)""", bgSec)
+                val fgsActive = Regex("""(?m)^fgs_active=(true|false)""").find(bgSec)?.groupValues?.getOrNull(1)?.toBooleanStrictOrNull()
+                val cgroupFrozen = firstInt("""(?m)^cgroup_frozen=(\d+)""", bgSec)
+                val wakelockActive = Regex("""(?m)^wakelock_active=(true|false)""").find(bgSec)?.groupValues?.getOrNull(1)?.toBooleanStrictOrNull()
+                result.put(
+                    "background",
+                    JSONObject()
+                        .put("doze_whitelist", dozeWhitelist ?: JSONObject.NULL)
+                        .put("standby_bucket", standbyBucket ?: JSONObject.NULL)
+                        .put("fgs_active", fgsActive ?: JSONObject.NULL)
+                        .put("cgroup_frozen", cgroupFrozen ?: JSONObject.NULL)
+                        .put("wakelock_active", wakelockActive ?: JSONObject.NULL)
+                )
+            }
+            return result
         }
     }
 
@@ -698,6 +719,13 @@ class SystemGatewayServer(
             .put("status", "online")
             .put("port", boundPort)
             .put("cpu_has_lse", LseCompatHelper.cpuHasHardwareLse())
+            .put("fgs_running", CoreServerService.isServiceRunning)
+            .put("agent_turn_active", CoreServerService.isAgentTurnActive)
+            .put("keep_background_alive", CoreServerService.isKeepBackgroundAliveEnabled)
+            .put("wakelock_held", wakeLockHolder?.isHeld == true)
+            .put("wifilock_held", wakeLockHolder?.isWifiLockHeld == true)
+            .put("battery_unrestricted", PermissionHelper.hasBatteryOptimizationExclusion(context))
+            .put("background_restricted", PermissionHelper.isBackgroundRestricted(context))
             .put("shizuku_enabled", snapshot.enabled)
             .put("shizuku_backend", snapshot.backend.id)
             .put("shizuku_state", snapshot.state.name.lowercase())
@@ -755,23 +783,27 @@ class SystemGatewayServer(
         val action = json.optString("action", "status").lowercase()
         val tag = json.optString("tag", "").trim()
         val timeoutMs = json.optLong("timeout_ms", 10 * 60 * 1000L)
+        val wantsWifi = if (json.has("wifi")) json.optBoolean("wifi", true) else tag.isNotEmpty()
         val result = JSONObject().put("ok", true)
 
         wakeLockHolder?.cleanupExpired()
 
         if (tag.isNotEmpty()) {
             val held = when (action) {
-                "acquire" -> wakeLockHolder?.acquireTagged(context, tag, timeoutMs) == true
+                "acquire" -> wakeLockHolder?.acquireTagged(context, tag, timeoutMs, withWifiLock = wantsWifi) == true
                 "release" -> wakeLockHolder?.releaseTagged(tag) == true
                 else -> wakeLockHolder?.isTaggedHeld(tag) == true
             }
-            result.put("held", held).put("tag", tag)
+            result.put("held", held)
+                .put("tag", tag)
+                .put("wifi_held", wakeLockHolder?.isWifiLockHeld == true)
         } else {
             when (action) {
-                "acquire" -> wakeLockHolder?.acquire(context, timeoutMs.coerceIn(1_000L, 60 * 60 * 1000L))
+                "acquire" -> wakeLockHolder?.acquire(context, timeoutMs.coerceIn(1_000L, 60 * 60 * 1000L), withWifiLock = wantsWifi)
                 "release" -> wakeLockHolder?.release()
             }
             result.put("held", wakeLockHolder?.isHeld == true)
+                .put("wifi_held", wakeLockHolder?.isWifiLockHeld == true)
         }
         return result
     }
@@ -1101,7 +1133,13 @@ class SystemGatewayServer(
             "echo '===GFX==='",
             "dumpsys gfxinfo '$pkg' | head -n 22",
             "echo '===ANR==='",
-            "dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5"
+            "dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5",
+            "echo '===BG==='",
+            "dumpsys deviceidle whitelist | grep -q ',$pkg,' && echo 'doze_whitelist=true' || echo 'doze_whitelist=false'",
+            "echo \"standby_bucket=\$(am get-standby-bucket '$pkg' 2>/dev/null | tr -dc '0-9')\"",
+            "dumpsys activity services '$pkg' | grep -q 'isForeground=true' && echo 'fgs_active=true' || echo 'fgs_active=false'",
+            "UID_BG=\$(dumpsys package '$pkg' | grep -m1 'appId=' | sed 's/.*appId=//;s/ .*//' | tr -dc '0-9'); if [ -n \"\$UID_BG\" ] && [ -r \"/sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze\" ]; then echo \"cgroup_frozen=\$(cat /sys/fs/cgroup/apps/uid_\${UID_BG}/cgroup.freeze 2>/dev/null)\"; fi",
+            "dumpsys power | grep -A 15 'Wake Locks:' | grep -q \"$pkg\" && echo 'wakelock_active=true' || echo 'wakelock_active=false'"
         ).joinToString("; ")
         val execRes = ShizukuManager.executePrivileged(
             context = context,

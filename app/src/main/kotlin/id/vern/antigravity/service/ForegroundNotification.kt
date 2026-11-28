@@ -9,16 +9,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import id.vern.antigravity.R
 import id.vern.antigravity.ui.MainActivity
 
 object ForegroundNotification {
 
+    private const val TAG = "ForegroundNotification"
     const val NOTIFICATION_ID = 1001
     const val CHANNEL_ID = "agy_core_service_channel"
 
-    fun start(service: Service, statusText: String? = null) {
+    fun start(service: Service, statusText: String? = null, isActiveTurn: Boolean = false) {
         val manager = service.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null) {
             val channel = NotificationChannel(
@@ -33,25 +35,50 @@ object ForegroundNotification {
         }
 
         val text = statusText ?: service.getString(R.string.notification_engine_active)
-        val notification = buildNotification(service, text)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            service.startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            service.startForeground(NOTIFICATION_ID, notification)
-        }
+        val notification = buildNotification(service, text, isActiveTurn)
+        promoteForeground(service, notification)
     }
 
-    fun update(context: Context, statusText: String? = null) {
+    private fun promoteForeground(service: Service, notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14/15/16: specialUse avoids the 6-hour dataSync FGS hard timeout.
+            try {
+                service.startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "specialUse FGS start failed (${e.message}); falling back to dataSync")
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                service.startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "dataSync FGS start failed (${e.message}); falling back to untyped startForeground")
+            }
+        }
+        service.startForeground(NOTIFICATION_ID, notification)
+    }
+
+    fun update(context: Context, statusText: String? = null, isActiveTurn: Boolean = false) {
         val text = statusText ?: context.getString(R.string.notification_engine_running)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        manager?.notify(NOTIFICATION_ID, buildNotification(context, text))
+        manager?.notify(NOTIFICATION_ID, buildNotification(context, text, isActiveTurn))
     }
 
-    fun buildNotification(context: Context, statusText: String): Notification {
+    fun buildNotification(
+        context: Context,
+        statusText: String,
+        isActiveTurn: Boolean = false
+    ): Notification {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -86,11 +113,14 @@ object ForegroundNotification {
         val iconRes = context.resources.getIdentifier("ic_notification", "drawable", context.packageName)
             .takeIf { it != 0 } ?: android.R.drawable.stat_notify_sync
 
-        return NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(statusText)
             .setSmallIcon(iconRes)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -104,7 +134,13 @@ object ForegroundNotification {
                 context.getString(R.string.notification_action_restart),
                 restartPendingIntent
             )
-            .build()
+
+        if (isActiveTurn) {
+            builder.setProgress(0, 0, true)
+        } else {
+            builder.setProgress(0, 0, false)
+        }
+
+        return builder.build()
     }
 }
-

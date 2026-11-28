@@ -714,5 +714,19 @@
     <string name="agent_review_empty_search">No matching modified files found.</string>
     <string name="agent_review_empty">No modified files in workspace to review.</string>
     <string name="topbar_core_update_short">Update</string>
+    <string name="notification_agent_working">Agent working</string>
+    <string name="notification_engine_keepalive">Engine running · Background keep-alive active</string>
+    <string name="dev_bg_section_title">Background Execution &amp; Keep-Alive</string>
+    <string name="dev_bg_battery_title">Battery &amp; Background Policy</string>
+    <string name="dev_bg_battery_status_unrestricted">Android Doze exempt · Background allowed</string>
+    <string name="dev_bg_battery_status_restricted">Restricted · May pause when screen is off</string>
+    <string name="dev_bg_locks_active_both">Keep-alive locks: CPU WakeLock + Wi-Fi Lock held</string>
+    <string name="dev_bg_locks_active_cpu">Keep-alive locks: CPU WakeLock held</string>
+    <string name="dev_bg_locks_standby">Keep-alive locks: Auto-acquired during active agent turns</string>
+    <string name="dev_bg_keep_alive_title">Keep Engine Awake in Background</string>
+    <string name="dev_bg_keep_alive_desc">Hold CPU &amp; Wi-Fi locks even when idle so scheduled daemon tasks and long sessions stay responsive with screen off.</string>
+    <string name="dev_bg_btn_allow_battery">Unrestricted Battery</string>
+    <string name="dev_bg_btn_oem_settings">OEM Freeze / Battery Settings</string>
+    <string name="bg_settings_unavailable_toast">Could not open system battery settings on this device.</string>
 </resources>
 

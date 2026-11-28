@@ -234,7 +234,7 @@ def parse_diag_sections(pkg, raw):
 
     anrs = [l.strip() for l in sections.get("ANR", "").splitlines() if l.strip()]
 
-    return {
+    result = {
         "ok": True,
         "package": pkg,
         "version_name": vname_m.group(1) if vname_m else None,
@@ -263,6 +263,21 @@ def parse_diag_sections(pkg, raw):
         },
         "recent_anrs": anrs,
     }
+    bg_sec = sections.get("BG", "")
+    if bg_sec.strip():
+        doze_m = re.search(r"(?m)^doze_whitelist=(true|false)", bg_sec)
+        bkt_m = re.search(r"(?m)^standby_bucket=(\d+)", bg_sec)
+        fgs_m = re.search(r"(?m)^fgs_active=(true|false)", bg_sec)
+        frz_m = re.search(r"(?m)^cgroup_frozen=(\d+)", bg_sec)
+        wl_m = re.search(r"(?m)^wakelock_active=(true|false)", bg_sec)
+        result["background"] = {
+            "doze_whitelist": (doze_m.group(1) == "true") if doze_m else None,
+            "standby_bucket": int(bkt_m.group(1)) if bkt_m else None,
+            "fgs_active": (fgs_m.group(1) == "true") if fgs_m else None,
+            "cgroup_frozen": int(frz_m.group(1)) if frz_m else None,
+            "wakelock_active": (wl_m.group(1) == "true") if wl_m else None,
+        }
+    return result
 
 
 def cmd_diag(args):
@@ -284,7 +299,14 @@ def cmd_diag(args):
             "echo '===PROCS==='; ps -A | wc -l; "
             f"echo '===MEM==='; dumpsys meminfo {q} | grep -E 'TOTAL PSS:|TOTAL:' | head -n 4; "
             f"echo '===GFX==='; dumpsys gfxinfo {q} | head -n 20; "
-            "echo '===ANR==='; dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5"
+            "echo '===ANR==='; dumpsys dropbox | grep -E 'data_app_anr|data_app_crash' | tail -n 5; "
+            "echo '===BG==='; "
+            f"dumpsys deviceidle whitelist | grep -q ',{pkg},' && echo 'doze_whitelist=true' || echo 'doze_whitelist=false'; "
+            f"echo \"standby_bucket=$(am get-standby-bucket {q} 2>/dev/null | tr -dc '0-9')\"; "
+            f"dumpsys activity services {q} | grep -q 'isForeground=true' && echo 'fgs_active=true' || echo 'fgs_active=false'; "
+            f"UID_BG=$(dumpsys package {q} | grep -m1 'appId=' | sed 's/.*appId=//;s/ .*//' | tr -dc '0-9'); "
+            "if [ -n \"$UID_BG\" ] && [ -r \"/sys/fs/cgroup/apps/uid_${UID_BG}/cgroup.freeze\" ]; then echo \"cgroup_frozen=$(cat /sys/fs/cgroup/apps/uid_${UID_BG}/cgroup.freeze 2>/dev/null)\"; fi; "
+            f"dumpsys power | grep -A 15 'Wake Locks:' | grep -q {q} && echo 'wakelock_active=true' || echo 'wakelock_active=false'"
         )
         res = gw_exec(shell_diag)
         if not res.get("ok"):
@@ -320,6 +342,12 @@ def cmd_diag(args):
         f"Graphics   : frames={gfx.get('total_frames')} | jank={gfx.get('janky_frames')} "
         f"({gfx.get('janky_percent')}%) | p50={gfx.get('p50_ms')}ms p90={gfx.get('p90_ms')}ms p99={gfx.get('p99_ms')}ms"
     )
+    bg = data.get("background")
+    if isinstance(bg, dict):
+        print(
+            f"Background : doze_exempt={bg.get('doze_whitelist')} | bucket={bg.get('standby_bucket')} | "
+            f"fgs={bg.get('fgs_active')} | frozen={bg.get('cgroup_frozen')} | wakelock={bg.get('wakelock_active')}"
+        )
     print(f"Recent ANR : {len(anrs)} entry(s)")
     for entry in anrs:
         print(f"  - {entry}")

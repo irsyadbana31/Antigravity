@@ -66,4 +66,21 @@ class CoreServerServiceTest {
         assertFalse(envInvalid.containsKey("AGY_GATEWAY_PORT"))
         assertFalse(envInvalid.containsKey("AGY_GATEWAY_TOKEN"))
     }
+
+    @Test
+    fun shouldHoldPersistentWakeLock_activeDuringTurnOrKeepAlivePref() {
+        assertFalse(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = false, keepAlivePref = false))
+        assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = true, keepAlivePref = false))
+        assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = false, keepAlivePref = true))
+        assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = true, keepAlivePref = true))
+    }
+
+    @Test
+    fun formatActiveTurnStatus_formatsShortAndLongDurations() {
+        assertEquals("Agent working…", CoreServerService.formatActiveTurnStatus(0L, "Agent working"))
+        assertEquals("Agent working…", CoreServerService.formatActiveTurnStatus(4L, "Agent working"))
+        assertEquals("Agent working (12s)…", CoreServerService.formatActiveTurnStatus(12L, "Agent working"))
+        assertEquals("Agent working (2m 5s)…", CoreServerService.formatActiveTurnStatus(125L, "Agent working"))
+        assertEquals("Agent working…", CoreServerService.formatActiveTurnStatus(-3L, ""))
+    }
 }

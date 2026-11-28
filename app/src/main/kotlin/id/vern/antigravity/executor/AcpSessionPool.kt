@@ -68,7 +68,8 @@ object AcpSessionPool {
         val stderrThread: Thread,
         val workingDirPath: String,
         val addDirPath: String?,
-        val configFingerprint: Long
+        val configFingerprint: Long,
+        val spawnedNetworkGen: Long
     ) {
         val writeLock = Any()
         val nextRpcId = AtomicInteger(1)
@@ -120,6 +121,7 @@ object AcpSessionPool {
 
     private val permissionsEnsured = AtomicBoolean(false)
     private val prewarmInProgress = AtomicBoolean(false)
+    private val networkGeneration = AtomicLong(0L)
 
     private val prewarmExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "AcpSessionPool-Prewarm").apply { isDaemon = true }
@@ -133,6 +135,48 @@ object AcpSessionPool {
     fun isTurnRunning(): Boolean = turnInProgress
 
     fun isWarmAlive(): Boolean = synchronized(stateLock) { warmSession?.isHealthy() == true }
+
+    fun onNetworkChanged() {
+        networkGeneration.incrementAndGet()
+        if (!turnInProgress) {
+            invalidate("network_changed")
+        }
+    }
+
+    fun onResumedAfterLongBackground(backgroundDurationMs: Long) {
+        if (turnInProgress || backgroundDurationMs < 2L * 60L * 1000L) return
+        val shouldRecycle = synchronized(stateLock) {
+            val cur = warmSession ?: return@synchronized false
+            !cur.isHealthy() || (System.currentTimeMillis() - cur.lastUsedAtMs.get()) >= 2L * 60L * 1000L
+        }
+        if (shouldRecycle) {
+            invalidate("resumed_after_${backgroundDurationMs / 1000}s_bg")
+        }
+    }
+
+    internal fun isTransientNetworkAbort(message: String?): Boolean {
+        if (message.isNullOrBlank()) return false
+        val lower = message.lowercase()
+        return lower.contains("software caused connection abort") ||
+            lower.contains("connection reset by peer") ||
+            lower.contains("broken pipe") ||
+            lower.contains("stream idle timeout") ||
+            lower.contains("unexpected eof") ||
+            lower.contains("acp eof during") ||
+            lower.contains("network is unreachable") ||
+            lower.contains("tls handshake timeout")
+    }
+
+    internal fun shouldRetryTransientFailure(
+        stopRequested: Boolean,
+        reusedWarm: Boolean,
+        emittedModelOutputOrTool: Boolean,
+        attempt: Int,
+        errorMessage: String?
+    ): Boolean {
+        if (stopRequested || emittedModelOutputOrTool || attempt != 1) return false
+        return reusedWarm || isTransientNetworkAbort(errorMessage)
+    }
 
     /**
      * Proactively spawns and initializes a warm `agy acp` daemon in the background
@@ -176,6 +220,7 @@ object AcpSessionPool {
                 } catch (_: Exception) {}
 
                 val fingerprint = computeConfigFingerprint(appCtx)
+                val curNetGen = networkGeneration.get()
                 if (!turnLock.tryLock()) return@execute
                 try {
                     val alreadyHealthy = synchronized(stateLock) {
@@ -184,12 +229,13 @@ object AcpSessionPool {
                             existing.isHealthy() &&
                             existing.workingDirPath == targetCwd.absolutePath &&
                             existing.addDirPath == addDir?.absolutePath &&
-                            existing.configFingerprint == fingerprint
+                            existing.configFingerprint == fingerprint &&
+                            existing.spawnedNetworkGen == curNetGen
                     }
                     if (alreadyHealthy) return@execute
 
                     val t0 = System.currentTimeMillis()
-                    val spawned = spawnAndInitialize(appCtx, targetCwd, addDir, fingerprint) { _, _ -> }
+                    val spawned = spawnAndInitialize(appCtx, targetCwd, addDir, fingerprint, curNetGen) { _, _ -> }
                     if (spawned != null) {
                         val elapsedMs = System.currentTimeMillis() - t0
                         val oldToDestroy = synchronized(stateLock) {
@@ -383,6 +429,7 @@ object AcpSessionPool {
         targetCwd: File,
         addDir: File?,
         configFingerprint: Long,
+        spawnedNetworkGen: Long,
         onInitErrorLine: (String, Boolean) -> Unit
     ): ManagedAcpProcess? {
         val filesDir = context.filesDir
@@ -495,7 +542,8 @@ object AcpSessionPool {
             stderrThread = stderrThread,
             workingDirPath = targetCwd.absolutePath,
             addDirPath = addDir?.absolutePath,
-            configFingerprint = configFingerprint
+            configFingerprint = configFingerprint,
+            spawnedNetworkGen = spawnedNetworkGen
         )
         // Share the same sink reference via managed.activeStderrSink
         // Re-wire stderr sink cleanly by delegating through managed
@@ -618,11 +666,13 @@ object AcpSessionPool {
             stopRequested = false
             turnInProgress = true
 
-            // Allow at most 1 transparent retry if a warm reused process died before emitting output
+            // Allow at most 1 transparent retry if a warm/stale process died or hit a
+            // transient socket abort before emitting model output or executing any tool.
             var attempt = 0
             while (attempt < 2) {
                 attempt++
                 var reusedWarm = false
+                val curNetGen = networkGeneration.get()
                 val session: ManagedAcpProcess = synchronized(stateLock) {
                     cancelIdleReapLocked()
                     val existing = warmSession
@@ -630,7 +680,8 @@ object AcpSessionPool {
                         existing.isHealthy() &&
                         existing.workingDirPath == targetCwd.absolutePath &&
                         existing.addDirPath == addDir?.absolutePath &&
-                        existing.configFingerprint == fingerprint
+                        existing.configFingerprint == fingerprint &&
+                        existing.spawnedNetworkGen == curNetGen
                     ) {
                         reusedWarm = true
                         existing
@@ -647,7 +698,7 @@ object AcpSessionPool {
                             onOutputLine(l, isErr)
                         }
                     }
-                    val spawned = spawnAndInitialize(context, targetCwd, addDir, fingerprint, stderrForwarder)
+                    val spawned = spawnAndInitialize(context, targetCwd, addDir, fingerprint, curNetGen, stderrForwarder)
                     if (spawned == null) {
                         if (!recordCrashAndBackoff()) {
                             return EngineExecutor.ACP_UNAVAILABLE
@@ -892,10 +943,12 @@ object AcpSessionPool {
 
                     session.activeSessionId = activeSessionId
                     if (onStreamEvent != null) {
-                        emittedAnyOutput = true
+                        // Do NOT mark emittedAnyOutput here: SessionInit happens before
+                        // session/prompt is sent, so marking it here would disable transparent
+                        // recovery if the warm process dies or aborts before producing output.
                         onStreamEvent(AcpStreamEvent.SessionInit(activeSessionId))
                     } else {
-                        emitLine(JSONObject().apply {
+                        onOutputLine(JSONObject().apply {
                             put("event", "init")
                             put("conversation_id", activeSessionId)
                         }.toString(), false)
@@ -936,6 +989,10 @@ object AcpSessionPool {
                             0
                         } else {
                             val errMsg = promptResp.optJSONObject("error")?.optString("message") ?: "ACP prompt error"
+                            if (shouldRetryTransientFailure(stopRequested, reusedWarm, emittedAnyOutput, attempt, errMsg)) {
+                                AppLogger.d(TAG, "Transient ACP failure before output ($errMsg); recycling daemon and retrying")
+                                throw java.io.IOException(errMsg)
+                            }
                             if (onStreamEvent != null) {
                                 onStreamEvent(AcpStreamEvent.RawOutput(errMsg, true))
                             } else {
@@ -966,8 +1023,9 @@ object AcpSessionPool {
                     }
                     session.destroyQuietly()
 
-                    if (!stopRequested && reusedWarm && !emittedAnyOutput && attempt == 1) {
-                        Log.w(TAG, "Warm ACP session died before output (${e.message}); retrying on fresh daemon")
+                    if (shouldRetryTransientFailure(stopRequested, reusedWarm, emittedAnyOutput, attempt, e.message)) {
+                        Log.w(TAG, "Warm/stale ACP session aborted before output (${e.message}); retrying on fresh daemon")
+                        AppLogger.d(TAG, "Recovering ACP session after transient abort: ${e.message}")
                         continue
                     }
                     if (!stopRequested) {

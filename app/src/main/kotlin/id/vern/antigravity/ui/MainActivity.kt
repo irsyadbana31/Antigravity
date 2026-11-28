@@ -133,6 +133,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         AgentCompletionNotification.onActivityPaused()
+        viewModel.onActivityPause()
         super.onPause()
     }
 

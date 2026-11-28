@@ -225,4 +225,29 @@ class SystemGatewayServerTest {
         assertEquals(1, anrs.length())
         assertTrue(anrs.getString(0).contains("2026-11-26 15:20:07"))
     }
+
+    @Test
+    fun parseShizukuDiagOutput_parsesBackgroundHealthSection() {
+        val sampleWithBg = """
+            ===PKG===
+            versionCode=20 minSdk=26 targetSdk=28
+            versionName=1.2.8-turbo
+            ===PID===
+            5539
+            ===BG===
+            doze_whitelist=true
+            standby_bucket=5
+            fgs_active=true
+            cgroup_frozen=0
+            wakelock_active=true
+        """.trimIndent()
+
+        val diag = SystemGatewayServer.parseShizukuDiagOutput("id.vern.antigravity.turbo", sampleWithBg)
+        val bg = diag.getJSONObject("background")
+        assertTrue(bg.getBoolean("doze_whitelist"))
+        assertEquals(5, bg.getInt("standby_bucket"))
+        assertTrue(bg.getBoolean("fgs_active"))
+        assertEquals(0, bg.getInt("cgroup_frozen"))
+        assertTrue(bg.getBoolean("wakelock_active"))
+    }
 }

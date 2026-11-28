@@ -4846,6 +4846,159 @@ fun DeveloperSettingsPage(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            val bgHealth by viewModel.backgroundHealth.collectAsStateWithLifecycle()
+            val keepBgAlive by viewModel.keepBackgroundAlive.collectAsStateWithLifecycle()
+            LaunchedEffect(Unit) {
+                viewModel.refreshBackgroundHealth(context)
+            }
+
+            SettingsSectionTitle(title = stringResource(R.string.dev_bg_section_title))
+            SettingsCard {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                            Text(
+                                text = stringResource(R.string.dev_bg_battery_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = stringResource(
+                                    if (bgHealth.batteryUnrestricted && !bgHealth.backgroundRestricted) {
+                                        R.string.dev_bg_battery_status_unrestricted
+                                    } else {
+                                        R.string.dev_bg_battery_status_restricted
+                                    }
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (bgHealth.batteryUnrestricted && !bgHealth.backgroundRestricted) {
+                                    AntigravityGreen
+                                } else {
+                                    AntigravityAmber
+                                }
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (bgHealth.batteryUnrestricted && !bgHealth.backgroundRestricted) AntigravityGreen
+                                    else AntigravityAmber
+                                )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val lockStatusText = when {
+                        bgHealth.wakeLockHeld && bgHealth.wifiLockHeld -> stringResource(R.string.dev_bg_locks_active_both)
+                        bgHealth.wakeLockHeld -> stringResource(R.string.dev_bg_locks_active_cpu)
+                        else -> stringResource(R.string.dev_bg_locks_standby)
+                    }
+                    Text(
+                        text = lockStatusText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = stringResource(R.string.dev_bg_keep_alive_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = stringResource(R.string.dev_bg_keep_alive_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = keepBgAlive,
+                            onCheckedChange = { viewModel.setKeepBackgroundAlive(context, it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    val isIndonesian = java.util.Locale.getDefault().language.equals("id", ignoreCase = true) ||
+                        java.util.Locale.getDefault().language.equals("in", ignoreCase = true)
+                    val oemGuideText = if (isIndonesian) bgHealth.oemProfile.guideId else bgHealth.oemProfile.guideEn
+                    Text(
+                        text = "${bgHealth.oemProfile.displayName}: $oemGuideText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 17.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!bgHealth.batteryUnrestricted) {
+                            Button(
+                                onClick = { viewModel.requestBatteryOptimizationExclusion(context) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.dev_bg_btn_allow_battery),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.openOemBackgroundSettings(context) },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.dev_bg_btn_oem_settings),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             SettingsSectionTitle(title = stringResource(R.string.dev_terminal_logs_title))
             LogViewer(
                 logs = logs,
