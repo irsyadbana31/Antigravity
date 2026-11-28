@@ -118,4 +118,12 @@ class AcpSessionPoolTest {
             )
         )
     }
+
+    @Test
+    fun shouldScheduleIdleReap_skipsReapingWhenKeepWarmIndefinitelyEnabled() {
+        assertTrue(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = false, hasWarmSession = true))
+        assertFalse(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = true, hasWarmSession = true))
+        assertFalse(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = false, hasWarmSession = false))
+        assertFalse(AcpSessionPool.shouldScheduleIdleReap(keepWarmMode = true, hasWarmSession = false))
+    }
 }

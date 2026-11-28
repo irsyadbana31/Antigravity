@@ -1,6 +1,7 @@
 package id.vern.antigravity.executor
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import id.vern.antigravity.gateway.ShizukuConfig
 import id.vern.antigravity.gateway.SystemGatewayServer
@@ -63,6 +64,7 @@ object AcpSessionPool {
 
     private class ManagedAcpProcess(
         val process: Process,
+        val pid: Int,
         val writer: BufferedWriter,
         val reader: BufferedReader,
         val stderrThread: Thread,
@@ -76,7 +78,8 @@ object AcpSessionPool {
         val loadedSessions = HashSet<String>()
         val lastModelBySession = HashMap<String, String>()
         val activeStderrSink = AtomicReference<((String, Boolean) -> Unit)?>(null)
-        val lastUsedAtMs = AtomicLong(System.currentTimeMillis())
+        val spawnedAtMs = System.currentTimeMillis()
+        val lastUsedAtMs = AtomicLong(spawnedAtMs)
         val broken = AtomicBoolean(false)
         @Volatile
         var activeSessionId: String? = null
@@ -119,6 +122,12 @@ object AcpSessionPool {
     @Volatile
     private var lastCrashTimeMs = 0L
 
+    @Volatile
+    private var keepWarmIndefinitely = false
+
+    @Volatile
+    var onWarmProcessReady: ((Int) -> Unit)? = null
+
     private val permissionsEnsured = AtomicBoolean(false)
     private val prewarmInProgress = AtomicBoolean(false)
     private val networkGeneration = AtomicLong(0L)
@@ -136,6 +145,51 @@ object AcpSessionPool {
 
     fun isWarmAlive(): Boolean = synchronized(stateLock) { warmSession?.isHealthy() == true }
 
+    fun isKeepWarmIndefinitely(): Boolean = keepWarmIndefinitely
+
+    fun setKeepWarmIndefinitely(enabled: Boolean) {
+        keepWarmIndefinitely = enabled
+        synchronized(stateLock) {
+            if (enabled) {
+                cancelIdleReapLocked()
+            } else if (warmSession?.isHealthy() == true && !turnInProgress) {
+                scheduleIdleReapLocked()
+            }
+        }
+    }
+
+    fun getWarmDaemonPid(): Int? = synchronized(stateLock) {
+        val cur = warmSession
+        if (cur != null && cur.isHealthy() && cur.pid > 0) cur.pid else null
+    }
+
+    fun getWarmDaemonUptimeMs(): Long = synchronized(stateLock) {
+        val cur = warmSession
+        if (cur != null && cur.isHealthy()) {
+            (System.currentTimeMillis() - cur.spawnedAtMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+    }
+
+    internal fun shouldScheduleIdleReap(keepWarmMode: Boolean, hasWarmSession: Boolean): Boolean =
+        !keepWarmMode && hasWarmSession
+
+    internal fun extractProcessPid(process: Process): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                return process.pid().toInt()
+            } catch (_: Throwable) {}
+        }
+        return try {
+            val field = process.javaClass.getDeclaredField("pid")
+            field.isAccessible = true
+            field.getInt(process)
+        } catch (_: Throwable) {
+            -1
+        }
+    }
+
     fun onNetworkChanged() {
         networkGeneration.incrementAndGet()
         if (!turnInProgress) {
@@ -147,7 +201,13 @@ object AcpSessionPool {
         if (turnInProgress || backgroundDurationMs < 2L * 60L * 1000L) return
         val shouldRecycle = synchronized(stateLock) {
             val cur = warmSession ?: return@synchronized false
-            !cur.isHealthy() || (System.currentTimeMillis() - cur.lastUsedAtMs.get()) >= 2L * 60L * 1000L
+            if (!cur.isHealthy()) {
+                true
+            } else if (keepWarmIndefinitely) {
+                false
+            } else {
+                (System.currentTimeMillis() - cur.lastUsedAtMs.get()) >= 2L * 60L * 1000L
+            }
         }
         if (shouldRecycle) {
             invalidate("resumed_after_${backgroundDurationMs / 1000}s_bg")
@@ -338,11 +398,13 @@ object AcpSessionPool {
 
     private fun scheduleIdleReapLocked() {
         cancelIdleReapLocked()
-        val current = warmSession ?: return
+        val current = warmSession
+        if (!shouldScheduleIdleReap(keepWarmIndefinitely, current != null)) return
+        val target = current ?: return
         idleReapTask = idleScheduler.schedule({
             val toDestroy = synchronized(stateLock) {
                 val cur = warmSession
-                if (cur === current && !turnInProgress) {
+                if (!keepWarmIndefinitely && cur === target && !turnInProgress) {
                     val idleMs = System.currentTimeMillis() - cur.lastUsedAtMs.get()
                     if (idleMs >= IDLE_TIMEOUT_MS - 1_000L) {
                         warmSession = null
@@ -537,6 +599,7 @@ object AcpSessionPool {
 
         val managed = ManagedAcpProcess(
             process = process,
+            pid = extractProcessPid(process),
             writer = writer,
             reader = reader,
             stderrThread = stderrThread,
@@ -564,7 +627,10 @@ object AcpSessionPool {
                 managed.destroyQuietly()
                 null
             } else {
-                Log.i(TAG, "Warm ACP daemon initialized for cwd=${targetCwd.absolutePath}")
+                Log.i(TAG, "Warm ACP daemon initialized (pid=${managed.pid}) for cwd=${targetCwd.absolutePath}")
+                if (managed.pid > 0) {
+                    runCatching { onWarmProcessReady?.invoke(managed.pid) }
+                }
                 managed
             }
         } catch (e: Exception) {
@@ -847,56 +913,74 @@ object AcpSessionPool {
                 }
 
                 fun readUntilResponse(expectedId: Int): JSONObject? {
-                    var line: String?
-                    while (session.reader.readLine().also { line = it } != null) {
-                        val trimmed = line?.trim().orEmpty()
-                        if (!trimmed.startsWith("{")) continue
-
-                        // Fast native Rust JSON-RPC line classifier/extractor:
-                        // avoids allocating org.json.JSONObject for every streaming text/thought chunk.
-                        val fast = RustTurboBridge.parseAcpLine(trimmed)
-                        if (fast != null) {
-                            when {
-                                fast.startsWith("T\n") -> {
-                                    handleThoughtChunk(fast.substring(2))
-                                    continue
-                                }
-                                fast.startsWith("M\n") -> {
-                                    handleMessageChunk(fast.substring(2))
-                                    continue
-                                }
-                                fast == "I" -> continue
-                                fast.startsWith("R\n") -> {
-                                    val idVal = fast.substring(2).toIntOrNull()
-                                    if (idVal == expectedId) {
-                                        return try { JSONObject(trimmed) } catch (_: Exception) { null }
-                                    }
-                                    continue
-                                }
-                                // fast == "C" (tool_call / tool_call_update): fall through to full JSONObject parse
+                    val batch = ArrayList<String>(16)
+                    while (true) {
+                        val firstLine = session.reader.readLine() ?: return null
+                        batch.clear()
+                        var totalChars = 0
+                        val firstTrimmed = firstLine.trim()
+                        if (firstTrimmed.startsWith("{")) {
+                            batch.add(firstTrimmed)
+                            totalChars += firstTrimmed.length
+                        }
+                        // Drain immediately-available buffered stdout lines with zero added delay
+                        // so bursts cross the JNI boundary once instead of per line.
+                        while (batch.size < 64 && totalChars < 131_072 && session.reader.ready()) {
+                            val nextLine = session.reader.readLine() ?: break
+                            val nextTrimmed = nextLine.trim()
+                            if (nextTrimmed.startsWith("{")) {
+                                batch.add(nextTrimmed)
+                                totalChars += nextTrimmed.length
                             }
                         }
+                        if (batch.isEmpty()) continue
 
-                        val msg = try { JSONObject(trimmed) } catch (_: Exception) { continue }
-                        val method = msg.optString("method")
-                        if (method == "session/update") {
-                            val upd = msg.optJSONObject("params")?.optJSONObject("update") ?: continue
-                            when (upd.optString("sessionUpdate")) {
-                                "agent_thought_chunk" -> {
-                                    val chunk = upd.optJSONObject("content")?.optString("text", "") ?: ""
-                                    handleThoughtChunk(chunk)
-                                }
-                                "tool_call", "tool_call_update" -> handleToolUpdate(upd)
-                                "agent_message_chunk" -> {
-                                    val chunk = upd.optJSONObject("content")?.optString("text", "") ?: ""
-                                    handleMessageChunk(chunk)
+                        val nativeRecords = RustTurboBridge.parseAcpBatch(batch)
+                        if (nativeRecords != null) {
+                            for (rec in nativeRecords) {
+                                when (rec.tag) {
+                                    'T' -> handleThoughtChunk(rec.body)
+                                    'M' -> handleMessageChunk(rec.body)
+                                    'C' -> {
+                                        val raw = batch.getOrNull(rec.lineIndex) ?: continue
+                                        val msg = try { JSONObject(raw) } catch (_: Exception) { continue }
+                                        val upd = msg.optJSONObject("params")?.optJSONObject("update") ?: continue
+                                        handleToolUpdate(upd)
+                                    }
+                                    'R' -> {
+                                        val idVal = rec.body.toIntOrNull()
+                                        if (idVal == expectedId) {
+                                            val raw = batch.getOrNull(rec.lineIndex) ?: return null
+                                            return try { JSONObject(raw) } catch (_: Exception) { null }
+                                        }
+                                    }
                                 }
                             }
-                        } else if (msg.has("id") && msg.optInt("id", -1) == expectedId) {
-                            return msg
+                            continue
+                        }
+
+                        // Kotlin fallback when native lib is unavailable
+                        for (trimmed in batch) {
+                            val msg = try { JSONObject(trimmed) } catch (_: Exception) { continue }
+                            val method = msg.optString("method")
+                            if (method == "session/update") {
+                                val upd = msg.optJSONObject("params")?.optJSONObject("update") ?: continue
+                                when (upd.optString("sessionUpdate")) {
+                                    "agent_thought_chunk" -> {
+                                        val chunk = upd.optJSONObject("content")?.optString("text", "") ?: ""
+                                        handleThoughtChunk(chunk)
+                                    }
+                                    "tool_call", "tool_call_update" -> handleToolUpdate(upd)
+                                    "agent_message_chunk" -> {
+                                        val chunk = upd.optJSONObject("content")?.optString("text", "") ?: ""
+                                        handleMessageChunk(chunk)
+                                    }
+                                }
+                            } else if (msg.has("id") && msg.optInt("id", -1) == expectedId) {
+                                return msg
+                            }
                         }
                     }
-                    return null
                 }
 
                 val turnOutcome: Int = try {

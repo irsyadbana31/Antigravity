@@ -716,6 +716,7 @@
     <string name="topbar_core_update_short">Update</string>
     <string name="notification_agent_working">Agen sedang bekerja</string>
     <string name="notification_engine_keepalive">Engine aktif · Keep-alive latar belakang menyala</string>
+    <string name="notification_engine_performance">Engine aktif · Performance Mode menyala</string>
     <string name="dev_bg_section_title">Eksekusi Latar Belakang &amp; Keep-Alive</string>
     <string name="dev_bg_battery_title">Kebijakan Baterai &amp; Latar Belakang</string>
     <string name="dev_bg_battery_status_unrestricted">Bebas Doze Android · Latar belakang diizinkan</string>
@@ -728,5 +729,33 @@
     <string name="dev_bg_btn_allow_battery">Baterai Tanpa Batas</string>
     <string name="dev_bg_btn_oem_settings">Pengaturan Beku / Baterai OEM</string>
     <string name="bg_settings_unavailable_toast">Tidak dapat membuka pengaturan baterai sistem pada perangkat ini.</string>
+    <string name="perf_section_title">Performance Mode</string>
+    <string name="perf_toggle_title">Performance Mode (Opsional)</string>
+    <string name="perf_toggle_desc">Jaga daemon ACP tetap hangat tanpa batas idle 6 menit, pin proses anak ke cluster CPU kencang saat foreground, terapkan setelan Shizuku, dan lindungi hardware dengan katup termal 43°C.</string>
+    <string name="perf_badge_off">Nonaktif</string>
+    <string name="perf_badge_active">Aktif</string>
+    <string name="perf_badge_cooling">Didinginkan</string>
+    <string name="perf_label_phantom">Phantom Process Killer</string>
+    <string name="perf_label_doze">Doze Whitelist</string>
+    <string name="perf_label_appops">AppOps Latar Belakang</string>
+    <string name="perf_label_bucket">Standby Bucket</string>
+    <string name="perf_label_affinity">Pinning Cluster CPU Kencang</string>
+    <string name="perf_label_acp">Daemon ACP Hangat</string>
+    <string name="perf_label_thermal">Katup Termal (43°C)</string>
+    <string name="perf_label_native">Engine Native Rust</string>
+    <string name="perf_val_unavailable">Shizuku tidak tersedia</string>
+    <string name="perf_val_not_checked">Ketuk Segarkan untuk baca-balik</string>
+    <string name="perf_val_disabled">Nonaktif</string>
+    <string name="perf_val_exempt">Dikecualikan</string>
+    <string name="perf_val_not_exempt">Belum dikecualikan</string>
+    <string name="perf_val_allowed">Diizinkan</string>
+    <string name="perf_val_restricted">Dibatasi</string>
+    <string name="perf_val_standby">Siaga</string>
+    <string name="perf_val_cooling_paused">Dijeda (didinginkan)</string>
+    <string name="perf_val_cpuset_deferred">Tertunda oleh cpuset latar belakang</string>
+    <string name="perf_btn_refresh">Segarkan Baca-Balik</string>
+    <string name="perf_btn_reapply_shizuku">Terapkan Tuning Shizuku</string>
+    <string name="perf_checklist_title">Checklist Perangkat (XOS / OEM)</string>
+    <string name="perf_checklist_body">• Kunci Antigravity Turbo di Recents.\n• Atur Baterai Aplikasi / Battery Lab ke Tidak Dibatasi (jangan dibekukan OEM).\n• Aktifkan GT / Performance mode untuk sesi panjang dan gunakan pendingin bila baterai di atas 42°C.</string>
 </resources>
 

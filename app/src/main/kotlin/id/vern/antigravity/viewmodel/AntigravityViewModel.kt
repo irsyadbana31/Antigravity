@@ -56,6 +56,8 @@ import id.vern.antigravity.service.RuleConfigService
 import id.vern.antigravity.service.RuleItem
 import id.vern.antigravity.service.McpConfigService
 import id.vern.antigravity.service.McpServerItem
+import id.vern.antigravity.service.PerformanceModeController
+import id.vern.antigravity.service.PerformanceStatusSnapshot
 import id.vern.antigravity.service.WakeLockHolder
 import id.vern.antigravity.service.TerminalLine
 import id.vern.antigravity.service.TerminalSessionManager
@@ -290,6 +292,11 @@ class AntigravityViewModel : ViewModel() {
     val verboseThinking: StateFlow<Boolean> = settingsPreferencesDelegate.verboseThinking
     val notifyOnCompletion: StateFlow<Boolean> = settingsPreferencesDelegate.notifyOnCompletion
     val keepBackgroundAlive: StateFlow<Boolean> = settingsPreferencesDelegate.keepBackgroundAlive
+    val performanceMode: StateFlow<Boolean> = settingsPreferencesDelegate.performanceMode
+    val performanceStatus: StateFlow<PerformanceStatusSnapshot> = PerformanceModeController.status
+
+    private val mutableIsRefreshingPerformance = MutableStateFlow(false)
+    val isRefreshingPerformance: StateFlow<Boolean> = mutableIsRefreshingPerformance.asStateFlow()
 
     private val mutableBackgroundHealth = MutableStateFlow(BackgroundHealthSnapshot())
     val backgroundHealth: StateFlow<BackgroundHealthSnapshot> = mutableBackgroundHealth.asStateFlow()
@@ -653,6 +660,13 @@ class AntigravityViewModel : ViewModel() {
         if (shizukuEnabled.value) {
             refreshShizukuStatus(context)
         }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (performanceMode.value) {
+                PerformanceModeController.syncOnStartupOrResume(context.applicationContext, reapplyShizuku = true)
+            } else {
+                PerformanceModeController.refreshStatus(context.applicationContext, includeShizukuReadback = false)
+            }
+        }
     }
 
     fun setModel(context: Context, model: String, budget: String = thinkingBudget.value, cliId: String? = null) =
@@ -670,6 +684,48 @@ class AntigravityViewModel : ViewModel() {
     fun setKeepBackgroundAlive(context: Context, enabled: Boolean) {
         settingsPreferencesDelegate.setKeepBackgroundAlive(context, enabled, ::addLog)
         refreshBackgroundHealth(context)
+    }
+
+    fun setPerformanceMode(context: Context, enabled: Boolean) {
+        settingsPreferencesDelegate.setPerformanceMode(context, enabled, ::addLog)
+        val appCtx = context.applicationContext
+        mutableIsRefreshingPerformance.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                PerformanceModeController.setEnabled(appCtx, enabled)
+            } finally {
+                mutableIsRefreshingPerformance.value = false
+                refreshBackgroundHealth(appCtx)
+            }
+        }
+    }
+
+    fun refreshPerformanceStatus(context: Context, includeShizukuReadback: Boolean = true) {
+        val appCtx = context.applicationContext
+        mutableIsRefreshingPerformance.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                PerformanceModeController.refreshStatus(appCtx, includeShizukuReadback = includeShizukuReadback)
+            } finally {
+                mutableIsRefreshingPerformance.value = false
+                refreshBackgroundHealth(appCtx)
+            }
+        }
+    }
+
+    fun reapplyPerformanceShizukuTuning(context: Context) {
+        val appCtx = context.applicationContext
+        mutableIsRefreshingPerformance.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                PerformanceModeController.applyShizukuTuningAndReadback(appCtx)
+                PerformanceModeController.refreshStatus(appCtx, includeShizukuReadback = false)
+                addLog("Performance", "Re-applied Shizuku system tuning for ${appCtx.packageName}")
+            } finally {
+                mutableIsRefreshingPerformance.value = false
+                refreshBackgroundHealth(appCtx)
+            }
+        }
     }
 
     fun refreshBackgroundHealth(context: Context) {
@@ -1044,6 +1100,11 @@ class AntigravityViewModel : ViewModel() {
             }
         }
         refreshBackgroundHealth(appCtx)
+        if (performanceMode.value) {
+            viewModelScope.launch(Dispatchers.IO) {
+                PerformanceModeController.syncOnStartupOrResume(appCtx, reapplyShizuku = false)
+            }
+        }
     }
 
     fun exchangeManualAuthCode(context: Context, rawCodeOrToken: String) =

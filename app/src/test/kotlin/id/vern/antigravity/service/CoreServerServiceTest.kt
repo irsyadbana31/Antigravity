@@ -73,6 +73,13 @@ class CoreServerServiceTest {
         assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = true, keepAlivePref = false))
         assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = false, keepAlivePref = true))
         assertTrue(CoreServerService.shouldHoldPersistentWakeLock(agentTurnActive = true, keepAlivePref = true))
+        assertTrue(
+            CoreServerService.shouldHoldPersistentWakeLock(
+                agentTurnActive = false,
+                keepAlivePref = false,
+                performanceModeActive = true
+            )
+        )
     }
 
     @Test

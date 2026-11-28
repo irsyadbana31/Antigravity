@@ -716,6 +716,7 @@
     <string name="topbar_core_update_short">Update</string>
     <string name="notification_agent_working">Agent working</string>
     <string name="notification_engine_keepalive">Engine running · Background keep-alive active</string>
+    <string name="notification_engine_performance">Engine running · Performance Mode active</string>
     <string name="dev_bg_section_title">Background Execution &amp; Keep-Alive</string>
     <string name="dev_bg_battery_title">Battery &amp; Background Policy</string>
     <string name="dev_bg_battery_status_unrestricted">Android Doze exempt · Background allowed</string>
@@ -728,5 +729,33 @@
     <string name="dev_bg_btn_allow_battery">Unrestricted Battery</string>
     <string name="dev_bg_btn_oem_settings">OEM Freeze / Battery Settings</string>
     <string name="bg_settings_unavailable_toast">Could not open system battery settings on this device.</string>
+    <string name="perf_section_title">Performance Mode</string>
+    <string name="perf_toggle_title">Performance Mode (Opt-in)</string>
+    <string name="perf_toggle_desc">Keep ACP daemon warm without 6-minute idle reaping, pin child processes to big CPU cores in foreground, apply Shizuku anti-kill rules, and protect hardware with a 43°C thermal guard.</string>
+    <string name="perf_badge_off">Off</string>
+    <string name="perf_badge_active">Active</string>
+    <string name="perf_badge_cooling">Cooling Down</string>
+    <string name="perf_label_phantom">Phantom Process Killer</string>
+    <string name="perf_label_doze">Doze Whitelist</string>
+    <string name="perf_label_appops">Background AppOps</string>
+    <string name="perf_label_bucket">Standby Bucket</string>
+    <string name="perf_label_affinity">Big-Core CPU Pinning</string>
+    <string name="perf_label_acp">Warm ACP Daemon</string>
+    <string name="perf_label_thermal">Thermal Guard (43°C)</string>
+    <string name="perf_label_native">Rust Native Engine</string>
+    <string name="perf_val_unavailable">Shizuku unavailable</string>
+    <string name="perf_val_not_checked">Tap Refresh to read back</string>
+    <string name="perf_val_disabled">Disabled</string>
+    <string name="perf_val_exempt">Exempt</string>
+    <string name="perf_val_not_exempt">Not exempt</string>
+    <string name="perf_val_allowed">Allowed</string>
+    <string name="perf_val_restricted">Restricted</string>
+    <string name="perf_val_standby">Standby</string>
+    <string name="perf_val_cooling_paused">Paused (cooling down)</string>
+    <string name="perf_val_cpuset_deferred">Deferred by background cpuset</string>
+    <string name="perf_btn_refresh">Refresh Readback</string>
+    <string name="perf_btn_reapply_shizuku">Apply Shizuku Tuning</string>
+    <string name="perf_checklist_title">Device Checklist (XOS / OEM)</string>
+    <string name="perf_checklist_body">• Lock Antigravity Turbo in Recents.\n• Set App Battery / Battery Lab to Unrestricted (no OEM freeze).\n• Enable GT / Performance mode for long sessions and use active cooling if battery exceeds 42°C.</string>
 </resources>
 

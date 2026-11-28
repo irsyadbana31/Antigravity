@@ -41,15 +41,18 @@ class CoreServerService : Service() {
         const val ACTION_ENSURE_ALIVE = "id.vern.antigravity.action.ENSURE_ALIVE"
         const val ACTION_AGENT_TURN_STATE = "id.vern.antigravity.action.AGENT_TURN_STATE"
         const val ACTION_SET_KEEP_ALIVE = "id.vern.antigravity.action.SET_KEEP_ALIVE"
+        const val ACTION_SET_PERFORMANCE_MODE = "id.vern.antigravity.action.SET_PERFORMANCE_MODE"
 
         const val EXTRA_AGENT_ACTIVE = "extra_agent_active"
         const val EXTRA_STATUS_TEXT = "extra_status_text"
         const val EXTRA_KEEP_ALIVE = "extra_keep_alive"
+        const val EXTRA_PERFORMANCE_ACTIVE = "extra_performance_active"
 
         private const val ACTIVE_TURN_WAKELOCK_SLICE_MS = 5 * 60 * 1000L
         private const val ACTIVE_TURN_RENEW_INTERVAL_MS = 25_000L
         private const val IDLE_KEEPALIVE_WAKELOCK_SLICE_MS = 10 * 60 * 1000L
         private const val IDLE_KEEPALIVE_RENEW_INTERVAL_MS = 4 * 60 * 1000L
+        private const val THERMAL_POLL_INTERVAL_MS = 20_000L
         private const val POST_TURN_GRACE_MS = 30_000L
 
         @Volatile
@@ -62,6 +65,10 @@ class CoreServerService : Service() {
 
         @Volatile
         var isKeepBackgroundAliveEnabled: Boolean = false
+            private set
+
+        @Volatile
+        var isPerformanceModeActive: Boolean = false
             private set
 
         @Volatile
@@ -106,6 +113,16 @@ class CoreServerService : Service() {
             dispatchServiceIntent(context, intent)
         }
 
+        fun setPerformanceMode(context: Context, active: Boolean) {
+            isPerformanceModeActive = active
+            if (!isServiceRunning && !active) return
+            val intent = Intent(context, CoreServerService::class.java).apply {
+                action = ACTION_SET_PERFORMANCE_MODE
+                putExtra(EXTRA_PERFORMANCE_ACTIVE, active)
+            }
+            dispatchServiceIntent(context, intent)
+        }
+
         fun stopService(context: Context) {
             val intent = Intent(context, CoreServerService::class.java).apply {
                 action = ACTION_STOP
@@ -132,8 +149,11 @@ class CoreServerService : Service() {
             }
         }
 
-        internal fun shouldHoldPersistentWakeLock(agentTurnActive: Boolean, keepAlivePref: Boolean): Boolean =
-            agentTurnActive || keepAlivePref
+        internal fun shouldHoldPersistentWakeLock(
+            agentTurnActive: Boolean,
+            keepAlivePref: Boolean,
+            performanceModeActive: Boolean = false
+        ): Boolean = agentTurnActive || keepAlivePref || performanceModeActive
 
         internal fun formatActiveTurnStatus(elapsedSec: Long, baseLabel: String): String {
             val safeSec = elapsedSec.coerceAtLeast(0L)
@@ -183,12 +203,15 @@ class CoreServerService : Service() {
 
     private var keepAliveJob: Job? = null
     private var postTurnGraceJob: Job? = null
+    private var thermalMonitorJob: Job? = null
     @Volatile
     private var activeTurnStartedAtMs: Long = 0L
     @Volatile
     private var activeTurnLabel: String = ""
     @Volatile
     private var keepAlivePref: Boolean = false
+    @Volatile
+    private var performanceActive: Boolean = false
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile
@@ -204,9 +227,11 @@ class CoreServerService : Service() {
         Log.i(TAG, "Creating CoreServerService...")
         keepAlivePref = loadKeepAlivePreference()
         isKeepBackgroundAliveEnabled = keepAlivePref
+        performanceActive = PerformanceModeController.isEffectivelyActive(this)
+        isPerformanceModeActive = performanceActive
 
         ForegroundNotification.start(this, getString(R.string.notification_engine_active))
-        wakeLockHolder.acquire(this, 30_000L, withWifiLock = keepAlivePref)
+        wakeLockHolder.acquire(this, 30_000L, withWifiLock = keepAlivePref || performanceActive)
         syncLockSnapshot()
 
         OrphanProcessCleaner.killOrphanCoreProcesses(this)
@@ -218,7 +243,13 @@ class CoreServerService : Service() {
         registerNetworkObserver()
         startBackgroundDaemon()
         reconcileKeepAliveState()
-        AppLogger.d("Engine", "CoreServerService running (Gateway 127.0.0.1:${gatewayServer?.activePort ?: 45161}, keepAlive=$keepAlivePref)")
+        if (PerformanceModeController.isEnabled(this)) {
+            startThermalMonitorLoop()
+            serviceScope.launch {
+                PerformanceModeController.syncOnStartupOrResume(this@CoreServerService, reapplyShizuku = true)
+            }
+        }
+        AppLogger.d("Engine", "CoreServerService running (Gateway 127.0.0.1:${gatewayServer?.activePort ?: 45161}, keepAlive=$keepAlivePref, perf=$performanceActive)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -251,6 +282,19 @@ class CoreServerService : Service() {
                 reconcileKeepAliveState()
                 AppLogger.d("Engine", "Background keep-alive updated: $enabled")
             }
+            ACTION_SET_PERFORMANCE_MODE -> {
+                val active = intent.getBooleanExtra(EXTRA_PERFORMANCE_ACTIVE, PerformanceModeController.isEffectivelyActive(this))
+                performanceActive = active
+                isPerformanceModeActive = active
+                reconcileKeepAliveState()
+                if (PerformanceModeController.isEnabled(this)) {
+                    startThermalMonitorLoop()
+                } else {
+                    thermalMonitorJob?.cancel()
+                    thermalMonitorJob = null
+                }
+                AppLogger.d("Engine", "Performance mode service state updated: active=$active")
+            }
             ACTION_ENSURE_ALIVE -> {
                 ensureGatewayAndDaemonAlive()
                 reconcileKeepAliveState()
@@ -276,9 +320,9 @@ class CoreServerService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        if (isAgentTurnActive || keepAlivePref) {
+        if (shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
             Log.i(TAG, "Task removed while background work/keep-alive active; keeping CoreServerService alive")
-            AppLogger.d("Engine", "Task swiped; CoreServerService staying alive (turnActive=$isAgentTurnActive, keepAlive=$keepAlivePref)")
+            AppLogger.d("Engine", "Task swiped; CoreServerService staying alive (turnActive=$isAgentTurnActive, keepAlive=$keepAlivePref, perf=$performanceActive)")
             reconcileKeepAliveState()
         }
     }
@@ -287,7 +331,7 @@ class CoreServerService : Service() {
         Log.w(TAG, "Foreground service timeout callback triggered (startId=$startId, fgsType=$fgsType)")
         AppLogger.e("Engine", "Android FGS timeout received (type=$fgsType); re-promoting service safely")
         try {
-            if (isAgentTurnActive || keepAlivePref) {
+            if (shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
                 ForegroundNotification.start(
                     this,
                     if (isAgentTurnActive) currentActiveNotificationText() else getString(R.string.notification_engine_running),
@@ -307,8 +351,10 @@ class CoreServerService : Service() {
         Log.i(TAG, "Destroying CoreServerService...")
         isServiceRunning = false
         isAgentTurnActive = false
+        isPerformanceModeActive = false
         keepAliveJob?.cancel()
         postTurnGraceJob?.cancel()
+        thermalMonitorJob?.cancel()
         unregisterNetworkObserver()
         dismissNotification()
         serviceScope.cancel()
@@ -352,10 +398,10 @@ class CoreServerService : Service() {
             activeTurnLabel = ""
             ForegroundNotification.update(
                 this,
-                if (keepAlivePref) getString(R.string.notification_engine_keepalive) else getString(R.string.notification_engine_running),
+                idleNotificationText(),
                 isActiveTurn = false
             )
-            if (keepAlivePref) {
+            if (keepAlivePref || performanceActive) {
                 reconcileKeepAliveState()
             } else {
                 // Keep lock briefly for post-turn git diff / title / persistence I/O, then release cleanly
@@ -364,7 +410,7 @@ class CoreServerService : Service() {
                 postTurnGraceJob?.cancel()
                 postTurnGraceJob = serviceScope.launch {
                     delay(POST_TURN_GRACE_MS)
-                    if (!isAgentTurnActive && !keepAlivePref) {
+                    if (!shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
                         wakeLockHolder.release()
                         syncLockSnapshot()
                     }
@@ -373,8 +419,16 @@ class CoreServerService : Service() {
         }
     }
 
+    private fun idleNotificationText(): String {
+        return when {
+            performanceActive -> getString(R.string.notification_engine_performance)
+            keepAlivePref -> getString(R.string.notification_engine_keepalive)
+            else -> getString(R.string.notification_engine_running)
+        }
+    }
+
     private fun reconcileKeepAliveState() {
-        if (shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref)) {
+        if (shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
             postTurnGraceJob?.cancel()
             val sliceMs = if (isAgentTurnActive) ACTIVE_TURN_WAKELOCK_SLICE_MS else IDLE_KEEPALIVE_WAKELOCK_SLICE_MS
             wakeLockHolder.acquire(this, sliceMs, withWifiLock = true)
@@ -383,7 +437,7 @@ class CoreServerService : Service() {
             if (!isAgentTurnActive) {
                 ForegroundNotification.update(
                     this,
-                    getString(R.string.notification_engine_keepalive),
+                    idleNotificationText(),
                     isActiveTurn = false
                 )
             }
@@ -405,7 +459,7 @@ class CoreServerService : Service() {
     private fun startKeepAliveLoop() {
         keepAliveJob?.cancel()
         keepAliveJob = serviceScope.launch {
-            while (isActive && shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref)) {
+            while (isActive && shouldHoldPersistentWakeLock(isAgentTurnActive, keepAlivePref, performanceActive)) {
                 val activeNow = isAgentTurnActive
                 val sliceMs = if (activeNow) ACTIVE_TURN_WAKELOCK_SLICE_MS else IDLE_KEEPALIVE_WAKELOCK_SLICE_MS
                 wakeLockHolder.acquire(this@CoreServerService, sliceMs, withWifiLock = true)
@@ -419,6 +473,16 @@ class CoreServerService : Service() {
                 }
                 val intervalMs = if (activeNow) ACTIVE_TURN_RENEW_INTERVAL_MS else IDLE_KEEPALIVE_RENEW_INTERVAL_MS
                 delay(intervalMs)
+            }
+        }
+    }
+
+    private fun startThermalMonitorLoop() {
+        if (thermalMonitorJob?.isActive == true) return
+        thermalMonitorJob = serviceScope.launch {
+            while (isActive && PerformanceModeController.isEnabled(this@CoreServerService)) {
+                PerformanceModeController.tickThermalGuard(this@CoreServerService)
+                delay(THERMAL_POLL_INTERVAL_MS)
             }
         }
     }
@@ -555,6 +619,9 @@ class CoreServerService : Service() {
                     if (exited && proc.exitValue() == 0) {
                         runCatching { proc.inputStream.close() }
                         AppLogger.d("Engine", "Background agy-daemon started")
+                        if (PerformanceModeController.isEffectivelyActive(this@CoreServerService)) {
+                            PerformanceModeController.applyBigCoreAffinity(this@CoreServerService)
+                        }
                     } else if (exited) {
                         val errText = runCatching {
                             proc.inputStream.bufferedReader().use { it.readText() }.trim()

@@ -25,6 +25,7 @@ import id.vern.antigravity.data.UserQuotaSummary
 import id.vern.antigravity.service.AgyModelsService
 import id.vern.antigravity.service.CliModel
 import id.vern.antigravity.service.CoreServerService
+import id.vern.antigravity.service.PerformanceModeController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +61,9 @@ class SettingsPreferencesDelegate {
 
     private val mutableKeepBackgroundAlive = MutableStateFlow(false)
     val keepBackgroundAlive: StateFlow<Boolean> = mutableKeepBackgroundAlive.asStateFlow()
+
+    private val mutablePerformanceMode = MutableStateFlow(false)
+    val performanceMode: StateFlow<Boolean> = mutablePerformanceMode.asStateFlow()
 
     private val mutableConversationWidth = MutableStateFlow("Default")
     val conversationWidth: StateFlow<String> = mutableConversationWidth.asStateFlow()
@@ -140,6 +144,8 @@ class SettingsPreferencesDelegate {
         mutableNotifyOnCompletion.value = notifyDone
         val keepBgAlive = prefs.getBoolean(AntigravityViewModel.KEY_KEEP_BACKGROUND_ALIVE, false)
         mutableKeepBackgroundAlive.value = keepBgAlive
+        val perfMode = prefs.getBoolean(PerformanceModeController.KEY_PERFORMANCE_MODE, false)
+        mutablePerformanceMode.value = perfMode
         val width = prefs.getString(AntigravityViewModel.KEY_CONVERSATION_WIDTH, "Default") ?: "Default"
         val preset = prefs.getString(AntigravityViewModel.KEY_THEME_PRESET, if (themeMode == ThemeMode.LIGHT) "Default Light" else "Default Dark") ?: "Default Dark"
         val customBg = prefs.getString(AntigravityViewModel.KEY_CUSTOM_THEME_BG, "#101010") ?: "#101010"
@@ -258,6 +264,13 @@ class SettingsPreferencesDelegate {
         prefs.edit().putBoolean(AntigravityViewModel.KEY_KEEP_BACKGROUND_ALIVE, enabled).apply()
         CoreServerService.setKeepBackgroundAlive(context.applicationContext, enabled)
         onLog("Engine", "Keep background alive set to: $enabled")
+    }
+
+    fun setPerformanceMode(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        mutablePerformanceMode.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(PerformanceModeController.KEY_PERFORMANCE_MODE, enabled).apply()
+        onLog("Performance", "Performance Mode set to: $enabled")
     }
 
     fun setConversationWidth(context: Context, width: String) {

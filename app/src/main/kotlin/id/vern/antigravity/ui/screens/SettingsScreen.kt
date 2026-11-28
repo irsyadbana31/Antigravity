@@ -142,6 +142,7 @@ import id.vern.antigravity.gateway.ShizukuBackend
 import id.vern.antigravity.gateway.ShizukuConnectionState
 import id.vern.antigravity.gateway.ShizukuStatusSnapshot
 import id.vern.antigravity.oauth.StoredAccount
+import id.vern.antigravity.service.PerformanceStatusSnapshot
 import id.vern.antigravity.ui.components.LogViewer
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
@@ -2352,6 +2353,13 @@ fun CustomizationsSettingsPage(
                 onImportDexFile = { rishDexPickerLauncher.launch(arrayOf("*/*")) },
                 onScanDexDownloads = { viewModel.scanRishDexFromDownloads(context) },
                 onRemoveDex = { viewModel.clearRishDex(context) }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            PerformanceModeSettingsSection(
+                viewModel = viewModel,
+                context = context
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -4999,6 +5007,13 @@ fun DeveloperSettingsPage(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            PerformanceModeSettingsSection(
+                viewModel = viewModel,
+                context = context
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             SettingsSectionTitle(title = stringResource(R.string.dev_terminal_logs_title))
             LogViewer(
                 logs = logs,
@@ -5008,6 +5023,284 @@ fun DeveloperSettingsPage(
 
             Spacer(modifier = Modifier.height(30.dp))
         }
+    }
+}
+
+@Composable
+private fun PerformanceModeSettingsSection(
+    viewModel: AntigravityViewModel,
+    context: Context
+) {
+    val perfEnabled by viewModel.performanceMode.collectAsStateWithLifecycle()
+    val perfStatus by viewModel.performanceStatus.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshingPerformance.collectAsStateWithLifecycle()
+    val shizukuEnabled by viewModel.shizukuEnabled.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshPerformanceStatus(context, includeShizukuReadback = shizukuEnabled)
+    }
+
+    val badgeText = when {
+        !perfEnabled -> stringResource(R.string.perf_badge_off)
+        perfStatus.thermal.isCoolingDown -> stringResource(R.string.perf_badge_cooling)
+        else -> stringResource(R.string.perf_badge_active)
+    }
+    val badgeColor = when {
+        !perfEnabled -> MaterialTheme.colorScheme.onSurfaceVariant
+        perfStatus.thermal.isCoolingDown -> AntigravityAmber
+        else -> AntigravityGreen
+    }
+
+    SettingsSectionTitle(title = stringResource(R.string.perf_section_title))
+    SettingsCard {
+        Column(modifier = Modifier.padding(14.dp).animateContentSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.perf_toggle_title),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = badgeColor.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = badgeColor,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.perf_toggle_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 17.sp
+                    )
+                }
+                Switch(
+                    checked = perfEnabled,
+                    onCheckedChange = { viewModel.setPerformanceMode(context, it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            val tuning = perfStatus.shizukuTuning
+            val phantomValue = when {
+                !tuning.shizukuAvailable -> stringResource(R.string.perf_val_unavailable)
+                tuning.phantomOk -> {
+                    val maxStr = tuning.maxPhantomProcesses?.let { " · max=$it" }.orEmpty()
+                    stringResource(R.string.perf_val_disabled) + maxStr
+                }
+                tuning.maxPhantomProcesses != null -> "Active (max=${tuning.maxPhantomProcesses})"
+                else -> stringResource(R.string.perf_val_not_checked)
+            }
+            val dozeValue = when {
+                !tuning.shizukuAvailable -> stringResource(R.string.perf_val_unavailable)
+                tuning.dozeWhitelisted == true -> stringResource(R.string.perf_val_exempt)
+                tuning.dozeWhitelisted == false -> stringResource(R.string.perf_val_not_exempt)
+                else -> stringResource(R.string.perf_val_not_checked)
+            }
+            val appopsValue = when {
+                !tuning.shizukuAvailable -> stringResource(R.string.perf_val_unavailable)
+                tuning.runAnyInBackgroundAllowed == true -> stringResource(R.string.perf_val_allowed)
+                tuning.runAnyInBackgroundAllowed == false -> stringResource(R.string.perf_val_restricted)
+                else -> stringResource(R.string.perf_val_not_checked)
+            }
+            val bucketValue = when {
+                !tuning.shizukuAvailable -> stringResource(R.string.perf_val_unavailable)
+                tuning.standbyBucket != null -> if (tuning.standbyActive) "Active (${tuning.standbyBucket})" else "Bucket ${tuning.standbyBucket}"
+                else -> stringResource(R.string.perf_val_not_checked)
+            }
+            val affinityValue = when {
+                perfStatus.thermal.isCoolingDown -> stringResource(R.string.perf_val_cooling_paused)
+                perfStatus.affinityDeferredByCpuset -> stringResource(R.string.perf_val_cpuset_deferred)
+                perfStatus.effectiveActive && perfStatus.cpuTopology.hasBigCluster -> {
+                    val actualCpus = perfStatus.acpStats?.cpusAllowedList?.takeIf { it.isNotBlank() }
+                        ?: perfStatus.daemonStats?.cpusAllowedList?.takeIf { it.isNotBlank() }
+                    val pinnedThreads = perfStatus.acpPinnedThreads + perfStatus.daemonPinnedThreads
+                    buildString {
+                        append(perfStatus.cpuTopology.formatClusterSummary())
+                        if (actualCpus != null) append(" · /proc=$actualCpus")
+                        if (pinnedThreads > 0) append(" (${pinnedThreads}t)")
+                    }
+                }
+                else -> perfStatus.cpuTopology.formatClusterSummary()
+            }
+            val acpValue = if (perfStatus.acpPid != null) {
+                val mins = perfStatus.acpUptimeSec / 60L
+                val secs = perfStatus.acpUptimeSec % 60L
+                val rssText = perfStatus.acpStats?.let {
+                    String.format(java.util.Locale.US, " · %.1f MB", it.rssMb)
+                }.orEmpty()
+                "PID ${perfStatus.acpPid} · ${mins}m ${secs}s$rssText"
+            } else {
+                stringResource(R.string.perf_val_standby)
+            }
+            val thermalValue = buildString {
+                val temp = perfStatus.thermal.batteryTempC
+                if (temp != null) {
+                    append(String.format(java.util.Locale.US, "%.1f°C", temp))
+                } else {
+                    append("N/A")
+                }
+                append(if (perfStatus.thermal.isCoolingDown) " · Cooling Down" else " · Normal")
+            }
+            val nativeStats = perfStatus.nativeEngineStats
+            val nativeValue = if (nativeStats.isLoaded) {
+                String.format(
+                    java.util.Locale.US,
+                    "%s · fallback %.1f%% (%d)",
+                    nativeStats.engineVersion.removePrefix("antigravity-turbo-"),
+                    nativeStats.fallbackRatePercent,
+                    nativeStats.totalCalls
+                )
+            } else {
+                nativeStats.engineVersion
+            }
+
+            PerformanceStatusRow(stringResource(R.string.perf_label_phantom), phantomValue, tuning.phantomOk)
+            PerformanceStatusRow(stringResource(R.string.perf_label_doze), dozeValue, tuning.dozeWhitelisted == true)
+            PerformanceStatusRow(stringResource(R.string.perf_label_appops), appopsValue, tuning.runAnyInBackgroundAllowed == true)
+            PerformanceStatusRow(stringResource(R.string.perf_label_bucket), bucketValue, tuning.standbyActive)
+            PerformanceStatusRow(
+                stringResource(R.string.perf_label_affinity),
+                affinityValue,
+                perfStatus.effectiveActive && !perfStatus.affinityDeferredByCpuset && perfStatus.cpuTopology.hasBigCluster
+            )
+            PerformanceStatusRow(stringResource(R.string.perf_label_acp), acpValue, perfStatus.acpPid != null)
+            PerformanceStatusRow(
+                stringResource(R.string.perf_label_thermal),
+                thermalValue,
+                !perfStatus.thermal.isCoolingDown,
+                isWarning = perfStatus.thermal.isCoolingDown
+            )
+            PerformanceStatusRow(stringResource(R.string.perf_label_native), nativeValue, nativeStats.isLoaded)
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { viewModel.refreshPerformanceStatus(context, includeShizukuReadback = true) },
+                    enabled = !isRefreshing,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.perf_btn_refresh),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (shizukuEnabled) {
+                    Button(
+                        onClick = { viewModel.reapplyPerformanceShizukuTuning(context) },
+                        enabled = !isRefreshing,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.perf_btn_reapply_shizuku),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = stringResource(R.string.perf_checklist_title),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.perf_checklist_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 17.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun PerformanceStatusRow(
+    label: String,
+    value: String,
+    isPositive: Boolean,
+    isWarning: Boolean = false
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 8.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = when {
+                isWarning -> AntigravityRed
+                isPositive -> AntigravityGreen
+                else -> MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f, fill = false)
+        )
     }
 }
 

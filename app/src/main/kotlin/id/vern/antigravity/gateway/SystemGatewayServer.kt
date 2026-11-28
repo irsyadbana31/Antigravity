@@ -22,7 +22,9 @@ import android.system.Os
 import android.util.Log
 import android.widget.Toast
 import id.vern.antigravity.install.LseCompatHelper
+import id.vern.antigravity.nativebridge.RustTurboBridge
 import id.vern.antigravity.service.CoreServerService
+import id.vern.antigravity.service.PerformanceModeController
 import id.vern.antigravity.service.WakeLockHolder
 import id.vern.antigravity.util.AppLogger
 import id.vern.antigravity.util.PermissionHelper
@@ -714,6 +716,7 @@ class SystemGatewayServer(
 
     private fun handleStatus(): JSONObject {
         val snapshot = ShizukuManager.inspectStatus(context)
+        val nativeStats = RustTurboBridge.statsSnapshot()
         return JSONObject()
             .put("ok", true)
             .put("status", "online")
@@ -722,6 +725,12 @@ class SystemGatewayServer(
             .put("fgs_running", CoreServerService.isServiceRunning)
             .put("agent_turn_active", CoreServerService.isAgentTurnActive)
             .put("keep_background_alive", CoreServerService.isKeepBackgroundAliveEnabled)
+            .put("performance_mode_enabled", PerformanceModeController.isEnabled(context))
+            .put("performance_mode_active", CoreServerService.isPerformanceModeActive)
+            .put("thermal_cooling_down", PerformanceModeController.isThermallyCoolingDown())
+            .put("native_rust_loaded", nativeStats.isLoaded)
+            .put("native_calls", nativeStats.nativeCalls)
+            .put("native_fallback_calls", nativeStats.fallbackCalls)
             .put("wakelock_held", wakeLockHolder?.isHeld == true)
             .put("wifilock_held", wakeLockHolder?.isWifiLockHeld == true)
             .put("battery_unrestricted", PermissionHelper.hasBatteryOptimizationExclusion(context))
